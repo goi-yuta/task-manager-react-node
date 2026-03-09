@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import bcrypt from 'bcrypt';
 import taskRoutes from './routes/taskRoutes';
@@ -8,6 +9,11 @@ dotenv.config();
 
 const app = express();
 const port = 3000;
+
+// CORSの許可
+app.use(cors({
+  origin: 'http://localhost:5173', // フロントエンドのURL（住所）だけを特別に許可
+}));
 
 // JSONボディをパースするミドルウェア
 app.use(express.json());
