@@ -1,132 +1,124 @@
-import { Request, Response } from 'express';
-import { pool } from '../db';
+import { Response } from 'express';
+import { Pool } from 'pg';
+import { AuthRequest } from '../middleware/authMiddleware';
 
-// タスク一覧取得の処理
-export const getAllTasks = async (req: Request, res: Response) => {
-  try {
-    const query = `
-      SELECT
-        tasks.id,
-        tasks.title,
-        tasks.status,
-        projects.name AS project_name,
-        users.name AS assignee_name
-      FROM tasks
-      LEFT JOIN projects ON tasks.project_id = projects.id
-      LEFT JOIN users ON tasks.assignee_id = users.id
-      WHERE tasks.deleted_at IS NULL;
-    `;
-    const result = await pool.query(query);
+const pool = new Pool({
+  user: process.env.DB_USER || 'admin',
+  host: process.env.DB_HOST || 'localhost',
+  database: process.env.DB_NAME || 'task_manager_db',
+  password: String(process.env.DB_PASSWORD || 'password123'),
+  port: parseInt(process.env.DB_PORT || '5432'),
+});
 
-    res.status(200).json({
-      message: 'タスク一覧を取得しました',
-      tasks: result.rows
-    });
-  } catch (err) {
-    console.error('Error fetching tasks:', err);
-    res.status(500).json({ error: 'サーバーエラーが発生しました' });
-  }
-};
+export const taskController = {
+  // タスク一覧の取得（自分のテナントのタスクのみ！）
+  async getAllTasks(req: AuthRequest, res: Response): Promise<void> {
+    // ミドルウェアで付与された情報を取得
+    const tenantId = req.user?.tenantId;
+    const projectId = req.query.projectId;
 
-// タスク作成 (POST)
-export const createTask = async (req: Request, res: Response) => {
-  const { title, due_date, project_id, assignee_id } = req.body;
+    try {
+      let query = `
+        SELECT tasks.*, users.name AS assignee_name, projects.name AS project_name
+        FROM tasks
+        LEFT JOIN users ON tasks.assignee_id = users.id
+        LEFT JOIN projects ON tasks.project_id = projects.id
+        WHERE tasks.tenant_id = $1 AND tasks.deleted_at IS NULL
+      `;
+      const values: any[] = [tenantId];
 
-  if (!title || !project_id) {
-    return res.status(400).json({ error: 'タイトルとプロジェクトIDは必須です' });
-  }
+      if (projectId) {
+        query += ` AND tasks.project_id = $2`;
+        values.push(projectId);
+      }
 
-  try {
-    const query = `
-      INSERT INTO tasks (title, due_date, project_id, assignee_id, created_by)
-      VALUES ($1, $2, $3, $4, $4)
-      RETURNING *;
-    `;
-    const result = await pool.query(query, [title, due_date, project_id, assignee_id]);
-    res.status(201).json({ message: 'タスクを作成しました', task: result.rows[0] });
-  } catch (err: any) {
-    console.error('Error creating task:', err);
-    if (err.code === '23503') {
-      return res.status(400).json({ error: '指定されたプロジェクトまたはユーザーが存在しません' });
+      query += ` ORDER BY tasks.id ASC`; // 順序の保証
+
+      const result = await pool.query(query, values);
+      res.json({ tasks: result.rows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'タスクの取得に失敗しました' });
     }
-    res.status(500).json({ error: 'サーバーエラーが発生しました' });
-  }
-};
+  },
 
-// タスク更新 (PUT)
-export const updateTaskStatus = async (req: Request, res: Response) => {
-  const taskId = req.params.taskId;
-  const { status } = req.body;
+  // タスクの作成
+  async createTask(req: AuthRequest, res: Response): Promise<void> {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const { title, project_id, assignee_id, due_date } = req.body;
 
-  const validStatuses = ['TODO', 'DOING', 'DONE'];
-  if (!status || !validStatuses.includes(status)) {
-    return res.status(400).json({ error: '無効なステータスです' });
-  }
-
-  try {
-    const query = `
-      UPDATE tasks
-      SET status = $1
-      WHERE id = $2 AND deleted_at IS NULL
-      RETURNING *;
-    `;
-    const result = await pool.query(query, [status, taskId]);
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'タスクが見つかりません' });
+    if (!title || !project_id) {
+      res.status(400).json({ error: 'タイトルとプロジェクトIDは必須です' });
+      return;
     }
-    res.status(200).json({ message: 'ステータスを更新しました', task: result.rows[0] });
-  } catch (err) {
-    console.error('Error updating task:', err);
-    res.status(500).json({ error: 'サーバーエラーが発生しました' });
-  }
-};
 
-// タスク論理削除 (DELETE)
-export const deleteTask = async (req: Request, res: Response) => {
-  const taskId = req.params.taskId;
+    try {
+      // 💡 悪意のあるユーザーが他社のプロジェクトIDを指定しても登録できないよう、
+      // 念のためプロジェクトが自社のものか確認する処理を入れるとさらに安全かも（今回は省略）
 
-  try {
-    const query = `
-      UPDATE tasks
-      SET deleted_at = CURRENT_TIMESTAMP
-      WHERE id = $1 AND deleted_at IS NULL;
-    `;
-    const result = await pool.query(query, [taskId]);
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ error: 'タスクが見つからないか、既に削除されています' });
+      const result = await pool.query(
+        `INSERT INTO tasks (tenant_id, title, project_id, assignee_id, due_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [tenantId, title, project_id, assignee_id || null, due_date || null, userId]
+      );
+      res.status(201).json(result.rows[0]);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'タスクの作成に失敗しました' });
     }
-    res.status(204).send();
-  } catch (err) {
-    console.error('Error deleting task:', err);
-    res.status(500).json({ error: 'サーバーエラーが発生しました' });
+  },
+
+  // タスクの更新
+  async updateTask(req: AuthRequest, res: Response): Promise<void> {
+    const tenantId = req.user?.tenantId;
+    const taskId = req.params.id;
+    const { status, title, assignee_id } = req.body;
+
+    try {
+      const result = await pool.query(
+        `UPDATE tasks
+         SET status = COALESCE($1, status),
+             title = COALESCE($2, title),
+             assignee_id = COALESCE($3, assignee_id)
+         WHERE id = $4 AND tenant_id = $5 AND deleted_at IS NULL
+         RETURNING *`,
+        [status, title, assignee_id, taskId, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
+        return;
+      }
+      res.json(result.rows[0]);
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'タスクの更新に失敗しました' });
+    }
+  },
+
+  // タスクの削除（論理削除）
+  async deleteTask(req: AuthRequest, res: Response): Promise<void> {
+    const tenantId = req.user?.tenantId;
+    const taskId = req.params.id;
+
+    try {
+      const result = await pool.query(
+        `UPDATE tasks
+         SET deleted_at = CURRENT_TIMESTAMP
+         WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+         RETURNING id`,
+        [taskId, tenantId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
+        return;
+      }
+      res.json({ message: 'タスクを削除しました', id: taskId });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'タスクの削除に失敗しました' });
+    }
   }
 };
-
-// // タスク物理削除 (DELETE)
-// export const deleteTask = async (req: Request, res: Response) => {
-//   const taskId = req.params.taskId;
-
-//   try {
-//     // DELETE文：指定したIDのタスクを削除する
-//     const query = `
-//       DELETE FROM tasks
-//       WHERE id = $1;
-//     `;
-
-//     const result = await pool.query(query, [taskId]);
-
-//     // 削除対象のタスクが存在しなかった場合
-//     if (result.rowCount === 0) {
-//       return res.status(404).json({ error: '指定されたタスクが見つかりません' });
-//     }
-
-//     // 削除成功時は 204 No Content を返すのが一般的です
-//     res.status(204).send();
-
-//   } catch (err) {
-//     console.error('Error deleting task:', err);
-//     res.status(500).json({ error: 'サーバーエラーが発生しました' });
-//   }
-// });
