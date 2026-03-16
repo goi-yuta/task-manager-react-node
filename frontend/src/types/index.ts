@@ -10,13 +10,23 @@ export interface Task {
   id: number;
   title: string;
   status: TaskStatus;
+  assignee_id: number | null;
   assignee_name: string | null;
+  project_id: number;
   project_name?: string;
 }
 
 export interface UserData {
   id: number;
   name: string;
+  email: string;
+  tenant_id: number;
+}
+
+export interface ProjectData {
+  id: number;
+  name: string;
+  description: string;
 }
 
 export type SortOrder = 'default' | 'asc' | 'desc';

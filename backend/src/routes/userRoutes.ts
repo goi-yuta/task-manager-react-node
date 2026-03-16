@@ -7,7 +7,10 @@ const router = Router();
 // 💡 ユーザーAPIにも関所（ミドルウェア）を適用
 router.use(authenticateToken);
 
-// ユーザーの作成（サインアップ）は authRoutes にあるので、ここでは一覧取得などのみ
+// GET /users -> メンバー一覧取得
 router.get('/', userController.getAllUsers);
+
+// POST /users/invite -> メンバー招待（新規追加）
+router.post('/invite', userController.inviteUser);
 
 export default router;
