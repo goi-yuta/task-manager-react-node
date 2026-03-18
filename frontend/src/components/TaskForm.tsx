@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { type UserData } from '../types';
+import { type UserData, type ProjectMember } from '../types';
 import { User, Plus } from 'lucide-react';
 
-export const TaskForm: React.FC<{ users: UserData[], onAdd: (title: string, assigneeId: number | '') => Promise<void> }> = ({ users, onAdd }) => {
+export const TaskForm: React.FC<{ users: (UserData | ProjectMember)[], onAdd: (title: string, assigneeId: number | '') => Promise<void> }> = ({ users, onAdd }) => {
   const [title, setTitle] = useState('');
   const [assigneeId, setAssigneeId] = useState<number | ''>(1);
   const [isSubmitting, setIsSubmitting] = useState(false);

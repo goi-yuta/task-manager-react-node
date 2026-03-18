@@ -1,119 +1,236 @@
-import React, { useState } from "react";
-import { X } from 'lucide-react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { X, UserPlus, Shield, ShieldAlert, Trash2 } from 'lucide-react';
+import type { ProjectMember } from '../types';
 
-interface InviteMemberModalProps {
+type User = { id: number; name: string; email: string };
+
+type Props = {
   isOpen: boolean;
   onClose: () => void;
-  onInviteSuccess: (newUser: any) => void;
-  token: string;
-}
+  projectId: number;
+  currentUserRole?: string; // 自分の権限（Ownerかどうか判定するため）
+  apiFetch: (endpoint: string, options?: RequestInit) => Promise<Response>;
+};
 
-export const InviteMemberModal: React.FC<InviteMemberModalProps> = ({ isOpen, onClose, onInviteSuccess, token }) => {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+export const InviteMemberModal: React.FC<Props> = ({ isOpen, onClose, projectId, currentUserRole, apiFetch }) => {
+  const [members, setMembers] = useState<ProjectMember[]>([]);
+  const [allUsers, setAllUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  if (!isOpen) return null;
+  // 追加フォーム用ステート
+  const [selectedUserId, setSelectedUserId] = useState<string>('');
+  const [selectedRole, setSelectedRole] = useState<'Owner' | 'Editor' | 'Viewer'>('Viewer');
 
-  const handleSubmit: React.ComponentProps<'form'>['onSubmit'] = async (e) => {
+  const isOwner = currentUserRole === 'Owner';
+
+  // メンバー一覧と、追加候補となる全ユーザー一覧を取得
+  const fetchData = useCallback(async () => {
+    if (!projectId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const [membersRes, usersRes] = await Promise.all([
+        apiFetch(`/projects/${projectId}/members`),
+        apiFetch(`/users`) // テナントの全ユーザー
+      ]);
+      const membersData = await membersRes.json();
+      const usersData = await usersRes.json();
+
+      setMembers(membersData.members || []);
+      setAllUsers(usersData.users || []);
+    } catch (err: any) {
+      setError(err.message || 'データの取得に失敗しました');
+    } finally {
+      setLoading(false);
+    }
+  }, [projectId, apiFetch]);
+
+  useEffect(() => {
+    if (isOpen) {
+      fetchData();
+      setSelectedUserId('');
+      setSelectedRole('Viewer');
+    }
+  }, [isOpen, fetchData]);
+
+  // メンバーを追加する
+  const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
-    setIsLoading(true);
+    if (!selectedUserId) return;
 
     try {
-      const response = await fetch('http://localhost:3000/users/invite', {
+      setError(null);
+      await apiFetch(`/projects/${projectId}/members`, {
         method: 'POST',
-        headers: {
-          'Content-type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ name, email, password }),
+        body: JSON.stringify({ user_id: parseInt(selectedUserId), role: selectedRole })
       });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || '招待に失敗しました');
-      }
-
-      // 成功したら親コンポーネントに新しいユーザーを渡してリストを更新
-      onInviteSuccess(data.user);
-
-      // フォームをリセットして閉じる
-      setName('');
-      setEmail('');
-      setPassword('');
-      onClose();
-      alert('メンバーを招待しました');
+      await fetchData(); // リストを再取得
+      setSelectedUserId(''); // フォームをリセット
     } catch (err: any) {
       setError(err.message);
-    } finally {
-      setIsLoading(false);
     }
   };
 
+  // メンバーの権限を変更する
+  const handleRoleChange = async (userId: number, newRole: string) => {
+    if (!window.confirm('権限を変更しますか？')) return;
+    try {
+      setError(null);
+      await apiFetch(`/projects/${projectId}/members/${userId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ role: newRole })
+      });
+      await fetchData();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  // メンバーを削除する
+  const handleRemoveMember = async (userId: number) => {
+    if (!window.confirm('このメンバーをプロジェクトから外してもよろしいですか？')) return;
+    try {
+      setError(null);
+      await apiFetch(`/projects/${projectId}/members/${userId}`, {
+        method: 'DELETE'
+      });
+      await fetchData();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  // まだプロジェクトに追加されていないユーザーだけをプルダウンの選択肢にする
+  const availableUsers = allUsers.filter(u => !members.some(m => m.id === u.id));
+
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 w-96 max-w-full shadow-xl">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-xl font-bold text-gray-800">メンバーを招待</h2>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700">
-            <X size={24} />
+    <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl flex flex-col max-h-[90vh]">
+        {/* ヘッダー */}
+        <div className="flex items-center justify-between p-6 border-b border-slate-100">
+          <div>
+            <h2 className="text-xl font-bold text-slate-800">プロジェクトメンバー管理</h2>
+            <p className="text-sm text-slate-500 mt-1">プロジェクトに参加するメンバーと権限を設定します</p>
+          </div>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors">
+            <X className="w-5 h-5" />
           </button>
         </div>
 
-        {error && (
-          <div className="bg-red-100 text-red-700 p-3 rounded mb-4 text-sm">
-            {error}
-          </div>
-        )}
+        <div className="p-6 overflow-y-auto">
+          {error && (
+            <div className="mb-6 p-4 bg-red-50 text-red-600 rounded-xl text-sm flex items-start gap-2">
+              <ShieldAlert className="w-5 h-5 shrink-0" />
+              <p>{error}</p>
+            </div>
+          )}
 
-        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* メンバー追加フォーム (Ownerのみ表示) */}
+          {isOwner && (
+            <form onSubmit={handleAddMember} className="mb-8 p-4 bg-slate-50 rounded-xl border border-slate-200">
+              <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+                <UserPlus className="w-4 h-4" /> メンバーを追加
+              </h3>
+              <div className="flex flex-col sm:flex-row gap-3">
+                <select
+                  className="flex-1 px-4 py-2 border border-slate-200 rounded-xl text-sm"
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  required
+                >
+                  <option value="">ユーザーを選択...</option>
+                  {availableUsers.map(u => (
+                    <option key={u.id} value={u.id}>{u.name} ({u.email})</option>
+                  ))}
+                </select>
+                <select
+                  className="w-full sm:w-32 px-4 py-2 border border-slate-200 rounded-xl text-sm"
+                  value={selectedRole}
+                  onChange={(e) => setSelectedRole(e.target.value as any)}
+                >
+                  <option value="Owner">Owner</option>
+                  <option value="Editor">Editor</option>
+                  <option value="Viewer">Viewer</option>
+                </select>
+                <button
+                  type="submit"
+                  disabled={!selectedUserId || loading}
+                  className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 whitespace-nowrap"
+                >
+                  追加
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* メンバー一覧 */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">名前</label>
-            <input
-              type="text"
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="山田 太郎"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">メールアドレス</label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="yamada@example.com"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">初期パスワード</label>
-            <input
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="••••••••"
-            />
-            <p className="text-xs text-gray-500 mt-1">招待する方にこのパスワードを伝えてください。</p>
+            <h3 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-2">
+              <Shield className="w-4 h-4" /> 参加中のメンバー ({members.length}名)
+            </h3>
+            {loading && members.length === 0 ? (
+              <p className="text-slate-400 text-sm text-center py-4">読み込み中...</p>
+            ) : (
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-slate-50 text-slate-500 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 font-medium">名前</th>
+                      <th className="px-4 py-3 font-medium">権限</th>
+                      {isOwner && <th className="px-4 py-3 font-medium text-right">操作</th>}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {members.map(member => (
+                      <tr key={member.id} className="hover:bg-slate-50/50">
+                        <td className="px-4 py-3">
+                          <p className="font-bold text-slate-800">{member.name}</p>
+                          <p className="text-xs text-slate-500">{member.email}</p>
+                        </td>
+                        <td className="px-4 py-3">
+                          {isOwner ? (
+                            <select
+                              value={member.role}
+                              onChange={(e) => handleRoleChange(member.id, e.target.value)}
+                              className="px-2 py-1 border border-slate-200 rounded-lg text-sm bg-white"
+                            >
+                              <option value="Owner">Owner</option>
+                              <option value="Editor">Editor</option>
+                              <option value="Viewer">Viewer</option>
+                            </select>
+                          ) : (
+                            <span className={`px-2 py-1 rounded-lg text-xs font-bold ${
+                              member.role === 'Owner' ? 'bg-amber-100 text-amber-700' :
+                              member.role === 'Editor' ? 'bg-blue-100 text-blue-700' :
+                              'bg-slate-100 text-slate-600'
+                            }`}>
+                              {member.role}
+                            </span>
+                          )}
+                        </td>
+                        {isOwner && (
+                          <td className="px-4 py-3 text-right">
+                            <button
+                              onClick={() => handleRemoveMember(member.id)}
+                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="プロジェクトから外す"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          <button
-            type="submit"
-            disabled={isLoading}
-            className="w-full bg-blue-600 text-white font-bold py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {isLoading ? '招待中...' : '招待する'}
-          </button>
-        </form>
+        </div>
       </div>
     </div>
   );

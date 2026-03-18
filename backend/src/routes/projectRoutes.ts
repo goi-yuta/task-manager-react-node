@@ -12,4 +12,9 @@ router.post('/', projectController.createProject);
 router.put('/:id', projectController.updateProject);
 router.delete('/:id', projectController.deleteProject);
 
+router.get('/:id/members', projectController.getProjectMembers);
+router.post('/:id/members', projectController.addMember);
+router.put('/:id/members/:userId', projectController.updateMemberRole);
+router.delete('/:id/members/:userId', projectController.removeMember)
+
 export default router;

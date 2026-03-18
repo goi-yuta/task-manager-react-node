@@ -27,6 +27,15 @@ export interface ProjectData {
   id: number;
   name: string;
   description: string;
+  role?: string;
 }
 
 export type SortOrder = 'default' | 'asc' | 'desc';
+
+export type ProjectMember = {
+  id: number;
+  name: string;
+  email: string;
+  role: 'Owner' | 'Editor' | 'Viewer';
+  joined_at: string;
+};

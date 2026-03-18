@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { InviteMemberModal } from './components/InviteMemberModal';
+import { InviteUserModal } from './components/InviteUserModal';
 import { TaskForm } from './components/TaskForm';
 import { TaskItem } from './components/TaskItem';
 import { useTaskManager } from './hooks/useTaskManager';
-import { type UserData, type ProjectData, type SortOrder } from './types';
+import { type UserData, type ProjectData, type SortOrder, type ProjectMember } from './types';
 import { CheckCircle2, RefreshCw, AlertCircle, Plus, LogOut, Folder, Mail, Lock, UserPlus } from 'lucide-react';
 
 // ==========================================
@@ -138,6 +139,9 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
   const [users, setUsers] = useState<UserData[]>([]);
 
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+  const [isInviteUserModalOpen, setIsInviteUserModalOpen] = useState(false);
+
+  const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
 
   // 初期データ（プロジェクトとユーザー）取得用のローディングとエラー
   const [initialLoading, setInitialLoading] = useState(true);
@@ -182,6 +186,28 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     fetchInitialData();
   }, [apiFetch]);
 
+  const fetchProjectMembers = useCallback(async () => {
+    if (!currentProjectId) {
+      setProjectMembers([]);
+      return;
+    }
+    try {
+      const res = await apiFetch(`/projects/${currentProjectId}/members`);
+      if (res.ok) {
+        const data = await res.json();
+        setProjectMembers(data.members || []);
+      }
+    } catch (err: any) {
+      console.error('メンバー取得エラー:', err.message);
+    }
+  }, [currentProjectId, apiFetch]);
+
+  useEffect(() => {
+    if (!isInviteModalOpen) {
+      fetchProjectMembers();
+    }
+  }, [fetchProjectMembers, isInviteModalOpen]);
+
   // 新規プロジェクト作成
   const createProject = async () => {
     const name = prompt('新しいプロジェクト名を入力してください');
@@ -198,6 +224,14 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
       alert(err.message);
     }
   };
+
+  // 現在選択中のプロジェクトの情報を取得し、自分の権限（Role）を特定する
+  const currentProject = projects.find(p => p.id === currentProjectId);
+  const currentUserRole = currentProject?.role;
+
+  // 組織レベルの管理者かどうかを簡易判定
+  // プロジェクトが1つもない初期状態、または自分がOwnerとして参加しているプロジェクトが1つでもあれば許可
+  const isTenantOwner = projects.length === 0 || projects.some(p => p.role === 'Owner');
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -219,21 +253,35 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                 {projects.length === 0 && <option value="">プロジェクトなし</option>}
                 {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
-              <button onClick={createProject} className="ml-2 p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors" title="プロジェクト追加">
-                <Plus className="w-4 h-4" />
-              </button>
+              {isTenantOwner && (
+                <button onClick={createProject} className="ml-2 p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors" title="プロジェクト追加">
+                  <Plus className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
 
           <div className="flex items-center gap-4">
             {/* メンバー招待ボタン */}
-            <button
-              onClick={() => setIsInviteModalOpen(true)}
-              className="hidden sm:flex items-center text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-bold"
-            >
-              <UserPlus className="w-4 h-4 mr-1.5" />
-              メンバー招待
-            </button>
+            {currentProjectId && (
+              <button
+                onClick={() => setIsInviteModalOpen(true)}
+                className="hidden sm:flex items-center text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-bold"
+              >
+                <UserPlus className="w-4 h-4 mr-1.5" />
+                メンバー管理
+              </button>
+            )}
+
+            {isTenantOwner && (
+              <button
+                onClick={() => setIsInviteUserModalOpen(true)}
+                className="hidden sm:flex items-center text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors font-bold"
+              >
+                <UserPlus className="w-4 h-4 mr-1.5" />
+                組織に招待
+              </button>
+            )}
 
             <div className="hidden sm:flex items-center gap-2 text-sm">
               <div className="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold">
@@ -265,14 +313,31 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
             <Folder className="w-16 h-16 text-slate-200 mx-auto mb-4" />
             <h2 className="text-xl font-bold text-slate-700 mb-2">プロジェクトがありません</h2>
             <p className="text-slate-500 mb-6">タスクを管理するには、まずプロジェクトを作成してください。</p>
-            <button onClick={createProject} className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 mx-auto">
-              <Plus className="w-5 h-5" />
-              <span>最初のプロジェクトを作成</span>
-            </button>
+            {isTenantOwner && (
+              <button onClick={createProject} className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition-all flex items-center gap-2 mx-auto">
+                <Plus className="w-5 h-5" />
+                <span>最初のプロジェクトを作成</span>
+              </button>
+            )}
           </div>
         ) : (
           <>
-            <TaskForm users={users} onAdd={addTask} />
+            <div className="mb-6 flex items-center gap-3">
+              <h2 className="text-2xl font-extrabold text-slate-800">{currentProject?.name}</h2>
+              {currentUserRole && (
+                <span className={`px-2 py-1 rounded-lg text-xs font-bold ${
+                  currentUserRole === 'Owner' ? 'bg-amber-100 text-amber-700' :
+                  currentUserRole === 'Editor' ? 'bg-blue-100 text-blue-700' :
+                  'bg-slate-100 text-slate-600'
+                }`}>
+                  {currentUserRole}
+                </span>
+              )}
+            </div>
+
+            {(currentUserRole === 'Owner' || currentUserRole === 'Editor') && (
+              <TaskForm users={projectMembers} onAdd={addTask} />
+            )}
 
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-slate-800">タスク一覧 <span className="text-slate-400 text-sm">({rawTasks.length}件)</span></h2>
@@ -298,6 +363,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                     task={task}
                     onToggle={toggleTaskStatus}
                     onDelete={deleteTask}
+                    currentUserRole={currentUserRole}
                   />
                 ))}
               </div>
@@ -305,11 +371,23 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
           </>
         )}
       </main>
-      <InviteMemberModal
-        isOpen={isInviteModalOpen}
-        onClose={() => setIsInviteModalOpen(false)}
-        onInviteSuccess={(newUser) => setUsers([...users, newUser])}
-        token={token}
+      {currentProjectId !== null && (
+        <InviteMemberModal
+          isOpen={isInviteModalOpen}
+          onClose={() => setIsInviteModalOpen(false)}
+          projectId={currentProjectId}
+          currentUserRole={currentUserRole}
+          apiFetch={apiFetch}
+        />
+      )}
+
+      <InviteUserModal
+        isOpen={isInviteUserModalOpen}
+        onClose={() => setIsInviteUserModalOpen(false)}
+        onInviteSuccess={(newUser) => {
+          setUsers([...users, newUser]);
+        }}
+        apiFetch={apiFetch}
       />
     </div>
   );
