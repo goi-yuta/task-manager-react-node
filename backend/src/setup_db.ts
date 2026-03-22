@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
-import bcrypt from 'bcrypt'; // bcrypt をインポート
+import bcrypt from 'bcrypt';
 
 dotenv.config();
 
@@ -69,12 +69,14 @@ async function setupDatabase() {
         tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
         title TEXT NOT NULL,
         status TEXT DEFAULT 'TODO',
+        start_date DATE,
         due_date TIMESTAMP,
         project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
         assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP
+        deleted_at TIMESTAMP,
+        CONSTRAINT check_dates CHECK (start_date IS NULL OR due_date IS NULL OR start_date <= due_date)
       );
     `);
     console.log('✅ Table "tasks" created.');
@@ -125,10 +127,10 @@ async function setupDatabase() {
 
     // ⑤ タスクの作成
     await client.query(`
-      INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, created_by, due_date) VALUES
-      ($1, 'Reactコンポーネントの実装', 'TODO', $2, $3, $3, CURRENT_TIMESTAMP + INTERVAL '1 day'),
-      ($1, 'Node.js APIの構築', 'DONE', $2, $3, $3, CURRENT_TIMESTAMP + INTERVAL '2 days'),
-      ($1, 'CORS設定の有効化', 'DONE', $2, $3, $3, CURRENT_TIMESTAMP + INTERVAL '3 days');
+      INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, created_by, start_date, due_date) VALUES
+      ($1, 'Reactコンポーネントの実装', 'TODO', $2, $3, $3, CURRENT_DATE, CURRENT_TIMESTAMP + INTERVAL '1 day'),
+      ($1, 'Node.js APIの構築', 'DONE', $2, $3, $3, CURRENT_DATE - INTERVAL '1 day', CURRENT_TIMESTAMP + INTERVAL '2 days'),
+      ($1, 'CORS設定の有効化', 'DONE', $2, $3, $3, CURRENT_DATE, CURRENT_TIMESTAMP + INTERVAL '3 days');
     `, [tenantId, projectId, userId]);
 
     console.log('✅ Test data inserted successfully!');

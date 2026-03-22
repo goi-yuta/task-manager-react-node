@@ -2,7 +2,7 @@ import React from 'react';
 import { TASK_STATUS, type Task } from '../types';
 import { CheckCircle2, Circle, CircleDot, Clock, User, Trash2 } from 'lucide-react';
 
-export const TaskItem: React.FC<{ task: Task, onToggle: (t: Task) => void, onDelete: (id: number) => void, currentUserRole?: string }> = ({ task, onToggle, onDelete, currentUserRole }) => {
+export const TaskItem: React.FC<{ task: Task, onToggle: (t: Task) => void, onDelete: (id: number) => void, onEdit: (t: Task) => void, currentUserRole?: string }> = ({ task, onToggle, onDelete, onEdit, currentUserRole }) => {
   const isViewer = currentUserRole === 'Viewer';
 
   const handleDelete = () => {
@@ -25,7 +25,11 @@ export const TaskItem: React.FC<{ task: Task, onToggle: (t: Task) => void, onDel
 
       <div className="flex-1 min-w-0">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <h3 className={`font-bold text-lg truncate ${task.status === TASK_STATUS.DONE ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+          <h3
+            onClick={() => onEdit(task)}
+            className={`font-bold text-lg truncate ${task.status === TASK_STATUS.DONE ? 'line-through text-slate-400' : 'text-slate-800'}`}
+            title="クリックして編集"
+          >
             {task.title}
           </h3>
           <div className="flex items-center gap-2">

@@ -1,6 +1,10 @@
 import { Response } from 'express';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 import { AuthRequest } from '../middleware/authMiddleware';
+
+// PostgreSQLのDATE型(OID: 1082)とTIMESTAMP型(OID: 1114)をDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
+types.setTypeParser(1082, (stringValue) => stringValue);
+types.setTypeParser(1114, (stringValue) => stringValue);
 
 const pool = new Pool({
   user: process.env.DB_USER || 'admin',
@@ -47,10 +51,15 @@ export const taskController = {
   async createTask(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.userId;
-    const { title, project_id, assignee_id, due_date } = req.body;
+    const { title, project_id, assignee_id, start_date, due_date } = req.body;
 
     if (!title || !project_id) {
       res.status(400).json({ error: 'タイトルとプロジェクトIDは必須です' });
+      return;
+    }
+
+    if (start_date && due_date && start_date > due_date) {
+      res.status(400).json({ error: '開始日は期限日より前（または同じ日）を指定してください' });
       return;
     }
 
@@ -72,9 +81,9 @@ export const taskController = {
       }
 
       const result = await pool.query(
-        `INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, due_date, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-        [tenantId, title, 'TODO', project_id, assignee_id || null, due_date || null, userId]
+        `INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, start_date, due_date, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+        [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, userId]
       );
       res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -88,36 +97,57 @@ export const taskController = {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.userId;
     const taskId = req.params.id;
-    const { status, title, due_date, assignee_id } = req.body;
+    const body = req.body;
+
+    if (body.start_date && body.due_date && body.start_date > body.due_date) {
+      res.status(400).json({ error: '開始日は期限日より前（または同じ日）を指定してください' });
+      return;
+    }
+
+    const allowedFields = ['status', 'title', 'start_date', 'due_date', 'assignee_id'];
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    allowedFields.forEach((field) => {
+      if (Object.prototype.hasOwnProperty.call(body, field)) {
+        updates.push(`${field} = $${values.length + 1}`);
+        values.push(body[field]);
+      }
+    });
+
+    if (updates.length === 0) {
+      res.status(400).json({ error: '更新する項目がありません' });
+      return;
+    }
 
     try {
-      const result = await pool.query(
-        `UPDATE tasks
-         SET status = COALESCE($1, tasks.status),
-             title = COALESCE($2, tasks.title),
-             due_date = COALESCE($3, tasks.due_date),
-             assignee_id = COALESCE($4, tasks.assignee_id)
-         FROM project_members pm
-         WHERE tasks.id = $5 AND tasks.tenant_id = $6
-           AND tasks.project_id = pm.project_id
-           AND pm.user_id = $7
-           AND pm.role IN ('Owner', 'Editor')
-           AND tasks.deleted_at IS NULL
-         RETURNING tasks.*`,
-        [status, title, due_date, assignee_id, taskId, tenantId, userId]
-      );
+      const query = `
+        UPDATE tasks
+        SET ${updates.join(', ')}
+        FROM project_members pm
+        WHERE tasks.id = $${values.length + 1} AND tasks.tenant_id = $${values.length + 2}
+          AND tasks.project_id = pm.project_id
+          AND pm.user_id = $${values.length + 3}
+          AND pm.role IN ('Owner', 'Editor')
+          AND tasks.deleted_at IS NULL
+        RETURNING tasks.*`;
+
+      const result = await pool.query(query, [...values, taskId, tenantId, userId]);
 
       if (result.rows.length === 0) {
         res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
         return;
       }
       res.json(result.rows[0]);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      if (err.code === '23514') {
+        res.status(400).json({ error: '開始日は期限日より前（または同じ日）を指定してください' });
+        return;
+      }
       res.status(500).json({ error: 'タスクの更新に失敗しました' });
     }
-  },
-
+    },
   // タスクの削除（論理削除）（Owner または Editor のみ可能）
   async deleteTask(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;

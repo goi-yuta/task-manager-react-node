@@ -1,11 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { InviteMemberModal } from './components/InviteMemberModal';
 import { InviteUserModal } from './components/InviteUserModal';
+import { TaskEditModal } from './components/TaskEditModal';
 import { TaskForm } from './components/TaskForm';
 import { TaskItem } from './components/TaskItem';
+import { GanttChart } from './components/GanttChart';
 import { useTaskManager } from './hooks/useTaskManager';
-import { type UserData, type ProjectData, type SortOrder, type ProjectMember } from './types';
-import { CheckCircle2, RefreshCw, AlertCircle, Plus, LogOut, Folder, Mail, Lock, UserPlus } from 'lucide-react';
+import { type UserData, type ProjectData, type SortOrder, type ProjectMember, type Task } from './types';
+import { CheckCircle2, RefreshCw, AlertCircle, Plus, LogOut, Folder, Mail, Lock, UserPlus, LayoutList, KanbanSquare } from 'lucide-react';
 
 // ==========================================
 // 1. 認証カスタムフック (Auth Logic)
@@ -143,6 +145,9 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
 
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
 
+  const [viewMode, setViewMode] = useState<'list' | 'gantt'>('list');
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+
   // 初期データ（プロジェクトとユーザー）取得用のローディングとエラー
   const [initialLoading, setInitialLoading] = useState(true);
   const [globalError, setGlobalError] = useState<string | null>(null);
@@ -157,6 +162,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     setSortOrder,
     addTask,
     toggleTaskStatus,
+    editTask,
     deleteTask
   } = useTaskManager(currentProjectId, apiFetch);
 
@@ -339,8 +345,26 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
               <TaskForm users={projectMembers} onAdd={addTask} />
             )}
 
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold text-slate-800">タスク一覧 <span className="text-slate-400 text-sm">({rawTasks.length}件)</span></h2>
+            <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-4">
+              <div className="flex items-center gap-4">
+                <h2 className="text-xl font-bold text-slate-800">タスク一覧 <span className="text-slate-400 text-sm">({rawTasks.length}件)</span></h2>
+
+                <div className="flex bg-slate-200/50 p-1 rounded-lg">
+                  <button
+                    onClick={() => setViewMode('list')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    <LayoutList className="w-4 h-4" /> リスト
+                  </button>
+                  <button
+                    onClick={() => setViewMode('gantt')}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-bold transition-all ${viewMode === 'gantt' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+                  >
+                    <KanbanSquare className="w-4 h-4" /> ガント
+                  </button>
+                </div>
+              </div>
+
               <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)} className="text-sm border-2 border-slate-200 rounded-xl px-3 py-1.5 bg-white font-medium cursor-pointer">
                 <option value="default">標準</option>
                 <option value="asc">古い順</option>
@@ -355,7 +379,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                 <CheckCircle2 className="w-16 h-16 text-emerald-200 mx-auto mb-4" />
                 <p className="text-slate-500 font-bold text-xl">タスクはありません</p>
               </div>
-            ) : (
+            ) : viewMode === 'list' ? (
               <div className="grid gap-3">
                 {displayedTasks.map(task => (
                   <TaskItem
@@ -363,10 +387,21 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                     task={task}
                     onToggle={toggleTaskStatus}
                     onDelete={deleteTask}
+                    onEdit={setEditingTask}
                     currentUserRole={currentUserRole}
                   />
                 ))}
               </div>
+            ) : (
+              <GanttChart
+                tasks={displayedTasks}
+                onEditTask={setEditingTask}
+                onUpdateDates={async (taskId, newStart, newDue) => {
+                  // ドロップ時にバックエンドに即座に更新処理を飛ばす
+                  await editTask(taskId, { start_date: newStart, due_date: newDue });
+                }}
+                currentUserRole={currentUserRole}
+              />
             )}
           </>
         )}
@@ -388,6 +423,20 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
           setUsers([...users, newUser]);
         }}
         apiFetch={apiFetch}
+      />
+
+      <TaskEditModal
+        isOpen={!!editingTask}
+        onClose={() => setEditingTask(null)}
+        task={editingTask}
+        users={projectMembers}
+        currentUserRole={currentUserRole}
+        onSave={async (updates) => {
+          if (editingTask) {
+            await editTask(editingTask.id, updates);
+            setEditingTask(null);
+          }
+        }}
       />
     </div>
   );

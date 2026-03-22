@@ -32,7 +32,8 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
   }, [fetchTasks]);
 
   // タスクの追加
-  const addTask = async (title: string, assigneeId: number | '') => {
+  // addTask に start_date と due_date を渡せるように引数を追加
+  const addTask = async (title: string, assigneeId: number | '', start_date: string, due_date: string) => {
     if (!currentProjectId) return;
     try {
       await apiFetch('/tasks', {
@@ -41,6 +42,8 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
           title,
           project_id: currentProjectId,
           assignee_id: assigneeId === '' ? null : assigneeId,
+          start_date: start_date || null,
+          due_date: due_date || null,
         }),
       });
       // 追加成功後に一覧を再取得
@@ -57,7 +60,6 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
     else if (task.status === TASK_STATUS.DOING) newStatus = TASK_STATUS.DONE;
 
     // オプティミスティックUI: 通信完了を待たずに画面（State）を先に更新
-    const previousTasks = [...tasks];
     setTasks(prevTasks => prevTasks.map(t => t.id === task.id ? { ...t, status: newStatus } : t));
 
     try {
@@ -66,23 +68,51 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
         body: JSON.stringify({ status: newStatus }),
       });
     } catch (err) {
-      // 失敗した場合は元の状態に戻す
-      setTasks(previousTasks);
+      // 失敗した場合は該当タスクのみ元の状態に戻す
+      setTasks(prevTasks => prevTasks.map(t => t.id === task.id ? task : t));
       alert('ステータスの更新に失敗しました。');
+    }
+  };
+
+  // タスクの編集
+  const editTask = async (id: number, updates: { title?: string; assignee_id?: number | null; start_date?: string | null; due_date?: string | null }) => {
+    // 変更前のタスクを保存
+    const previousTask = tasks.find(t => t.id === id);
+    if (!previousTask) return;
+
+    // オプティミスティックUI: 通信を待たずに画面を先に更新
+    setTasks(prevTasks => prevTasks.map(t => t.id === id ? { ...t, ...updates } : t));
+
+    try {
+      await apiFetch(`/tasks/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify(updates),
+      });
+      // 成功時も、DBでの正規化された値（RETURNINGされた値など）を反映させたい場合はfetchTasks()する
+      // ここでは整合性を重視してfetchTasks()を残すが、ロールバックは個別に行う
+      fetchTasks();
+    } catch (err) {
+      // 失敗した場合は該当タスクのみ元の状態に戻す
+      setTasks(prevTasks => prevTasks.map(t => t.id === id ? previousTask : t));
+      alert('タスクの更新に失敗しました。');
+      throw err;
     }
   };
 
   // タスクの削除
   const deleteTask = async (id: number) => {
+    // 削除対象のタスクを一時保存
+    const taskToDelete = tasks.find(t => t.id === id);
+    if (!taskToDelete) return;
+
     // オプティミスティックUI: 画面から即座に消す
-    const previousTasks = [...tasks];
     setTasks(prevTasks => prevTasks.filter(t => t.id !== id));
 
     try {
       await apiFetch(`/tasks/${id}`, { method: 'DELETE' });
     } catch (err) {
-      // 失敗した場合は元の状態に戻す
-      setTasks(previousTasks);
+      // 失敗した場合は再取得して元の状態に戻す（リスト順序の整合性のため再取得）
+      fetchTasks();
       alert('削除に失敗しました。');
     }
   };
@@ -103,6 +133,7 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
     addTask,
     toggleTaskStatus,
     deleteTask,
+    editTask,
     refreshTasks: fetchTasks,
   };
 };

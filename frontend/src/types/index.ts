@@ -10,6 +10,8 @@ export interface Task {
   id: number;
   title: string;
   status: TaskStatus;
+  start_date?: string | null;
+  due_date?: string | null;
   assignee_id: number | null;
   assignee_name: string | null;
   project_id: number;

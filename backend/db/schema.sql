@@ -30,10 +30,12 @@ CREATE TABLE tasks (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     status VARCHAR(50) CHECK (status IN ('TODO', 'DOING', 'DONE')) DEFAULT 'TODO',
+    start_date DATE,
     due_date TIMESTAMP,
     project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
     assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_by INTEGER REFERENCES users(id),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP
+    deleted_at TIMESTAMP,
+    CONSTRAINT check_dates CHECK (start_date IS NULL OR due_date IS NULL OR start_date <= due_date)
 );
