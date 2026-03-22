@@ -24,20 +24,20 @@
 
 **Frontend**
 
-* React 19
-* TypeScript
-* Vite
-* Tailwind CSS (v4)
-* Lucide React (Icons)
+* [React 19](https://react.dev/)
+* [TypeScript](https://www.typescriptlang.org/)
+* [Vite](https://vite.dev/)
+* [Tailwind CSS (v4)](https://tailwindcss.com/)
+* [Lucide React](https://lucide.dev/) (Icons)
 
 **Backend**
 
-* Node.js
-* Express
-* PostgreSQL (生のSQLによるクエリ実行)
-* pg (node-postgres)
-* bcrypt (パスワードハッシュ化)
-* jsonwebtoken (JWT認証)
+* [Node.js](https://nodejs.org/ja)
+* [Express](https://expressjs.com/)
+* [PostgreSQL](https://www.postgresql.org/) (生のSQLによるクエリ実行)
+* [pg (node-postgres)](https://node-postgres.com/)
+* [bcrypt](https://github.com/kelektiv/node.bcrypt.js) (パスワードハッシュ化)
+* [jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) (JWT認証)
 
 ## 📁 ディレクトリ構成
 
@@ -61,19 +61,30 @@ npm install
 ```
 
 #### 環境変数の設定
-`backend`ディレクトリ内に`.env`ファイルを作成し、データベースの接続情報と認証用のシークレットキーを設定してください。
+
+`backend`ディレクトリ内に`.env`ファイルを作成し、データベースの接続情報と認証用のシークレットキーを設定してください。  
+（※ データベースの接続情報の初期値は、同梱されている`docker-compose.yml`と一致させています）
 
 ```bash
 PORT=3000
-DB_USER=your_postgres_user
+DB_USER=admin
 DB_HOST=localhost
-DB_NAME=task_manager
-DB_PASSWORD=your_postgres_password
+DB_NAME=task-manager-db
+DB_PASSWORD=password123
 DB_PORT=5432
 
-# 認証用の環境変数
+# 認証用の環境変数（任意の複雑な文字列に変更して使用してください）
 JWT_SECRET=your_super_secret_jwt_key
-SUPER_ADMIN_KEY=my_super_secret_key_123
+SUPER_ADMIN_KEY=your_super_secret_key_123
+```
+
+#### データベース（PostgreSQL）の起動
+
+Dockerを利用してローカルにデータベースを立ち上げます。  
+（※ 事前にDocker Desktop等のインストールと起動が必要です）
+
+```bash
+docker-compose up -d
 ```
 
 #### データベースのセットアップと起動
