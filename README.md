@@ -12,13 +12,13 @@
 * **第2回（フロントエンド結合編）**：  
   [20年目のフロントエンドエンジニアが自作APIとReactを結合して気づいた「境界線」の壁](https://zenn.dev/goiyu/articles/c246169e21c718)
 * **第3回（SaaSアーキテクチャ・認証編）**：  
-  [20年目のフロントエンドエンジニアが自作タスクアプリをBtoB SaaSに進化させてみた（SaaSアーキテクチャ・認証編）](https://zenn.dev/goiyu/articles/34c552e584ba41)
+  [401エラーの正体とマルチテナントの泥臭い裏側。20年目のフロントエンジニアがSaaSを自作して得た気づき](https://zenn.dev/goiyu/articles/34c552e584ba41)
 * **第4回（メンバー招待・リファクタリング編）**：  
-  [20年目のフロントエンドエンジニアが自作タスクアプリをBtoB SaaSに進化させてみた（メンバー招待・リファクタリング編）](https://zenn.dev/goiyu/articles/6909dd8f6c06b3)
+  [いるはずのない「tanakaさん」の罠とloadingの細分化。20年目がメンバー招待APIを自作して気づいたSaaSの裏側](https://zenn.dev/goiyu/articles/6909dd8f6c06b3)
 * **第5回（アクセス権限・UI制御編）**：  
-  [20年目のフロントエンドエンジニアが自作タスクアプリをBtoB SaaSに進化させてみた（アクセス権限・UI制御編）](https://zenn.dev/goiyu/articles/e4220968a5cdd8)
+  [フロントは配慮、バックは砦。「エイリアスの罠」にハマった20年目が挑むSaaSのアクセス権限](https://zenn.dev/goiyu/articles/e4220968a5cdd8)
 * **第6回（ガントチャート・ドラッグ＆ドロップ編）**：  
-  [20年目のフロントエンドエンジニアが自作タスクアプリをBtoB SaaSに進化させてみた（ガントチャート・ドラッグ＆ドロップ編）](https://zenn.dev/goiyu/articles/fcca1d450abfe9)
+  [「1日ズレる呪い」とCSS Grid。20年目のフロントエンジニアがライブラリなしで作り上げたガントチャート](https://zenn.dev/goiyu/articles/fcca1d450abfe9)
 
 ## 🛠️ 技術スタック
 
