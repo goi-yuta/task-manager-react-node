@@ -19,6 +19,8 @@
   [フロントは配慮、バックは砦。「エイリアスの罠」にハマった20年目が挑むSaaSのアクセス権限](https://zenn.dev/goiyu/articles/e4220968a5cdd8)
 * **第6回（ガントチャート・ドラッグ＆ドロップ編）**：  
   [「1日ズレる呪い」とCSS Grid。20年目のフロントエンジニアがライブラリなしで作り上げたガントチャート](https://zenn.dev/goiyu/articles/fcca1d450abfe9)
+* **第7回（リッチテキスト・メンション機能編）**：  
+  [「古い記憶の罠」と再描画の壁。20年目のフロントエンジニアがTiptapでSaaSのメンション機能を自作して得た気づき](https://zenn.dev/goiyu/articles/ea72e6d8484614)
 
 ## 🛠️ 技術スタック
 
@@ -29,6 +31,8 @@
 * [Vite](https://vite.dev/)
 * [Tailwind CSS (v4)](https://tailwindcss.com/)
 * [Lucide React](https://lucide.dev/) (Icons)
+* [Tiptap](https://tiptap.dev/) (Rich Text Editor)
+* [DOMPurify](https://github.com/cure53/DOMPurify) (XSS Sanitization)
 
 **Backend**
 
