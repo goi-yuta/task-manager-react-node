@@ -30,6 +30,7 @@ CREATE TABLE tasks (
     id SERIAL PRIMARY KEY,
     title VARCHAR(255) NOT NULL,
     status VARCHAR(50) CHECK (status IN ('TODO', 'DOING', 'DONE')) DEFAULT 'TODO',
+    description TEXT,
     start_date DATE,
     due_date TIMESTAMP,
     project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
@@ -38,4 +39,12 @@ CREATE TABLE tasks (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP,
     CONSTRAINT check_dates CHECK (start_date IS NULL OR due_date IS NULL OR start_date <= due_date)
+);
+
+CREATE TABLE task_comments (
+    id SERIAL PRIMARY KEY,
+    task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

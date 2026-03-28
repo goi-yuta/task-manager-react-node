@@ -20,6 +20,7 @@ async function setupDatabase() {
 
     // 依存関係を考慮して削除 (子テーブルから先に削除)
     await client.query('DROP TABLE IF EXISTS project_members;');
+    await client.query('DROP TABLE IF EXISTS task_comments;');
     await client.query('DROP TABLE IF EXISTS tasks;');
     await client.query('DROP TABLE IF EXISTS projects;');
     await client.query('DROP TABLE IF EXISTS users;');
@@ -36,7 +37,7 @@ async function setupDatabase() {
     `);
     console.log('✅ Table "tenants" created.');
 
-    // 1. users テーブル作成 (tenant_id, password_hash を追加)
+    // 1. users テーブル作成
     await client.query(`
       CREATE TABLE users (
         id SERIAL PRIMARY KEY,
@@ -49,7 +50,7 @@ async function setupDatabase() {
     `);
     console.log('✅ Table "users" created.');
 
-    // 2. projects テーブル作成 (tenant_id, created_by を追加)
+    // 2. projects テーブル作成
     await client.query(`
       CREATE TABLE projects (
         id SERIAL PRIMARY KEY,
@@ -62,7 +63,7 @@ async function setupDatabase() {
     `);
     console.log('✅ Table "projects" created.');
 
-    // 3. tasks テーブル作成 (tenant_id を追加)
+    // 3. tasks テーブル作成
     await client.query(`
       CREATE TABLE tasks (
         id SERIAL PRIMARY KEY,
@@ -71,6 +72,7 @@ async function setupDatabase() {
         status TEXT DEFAULT 'TODO',
         start_date DATE,
         due_date TIMESTAMP,
+        description TEXT,
         project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE,
         assignee_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -93,6 +95,18 @@ async function setupDatabase() {
       );
     `);
     console.log('✅ Table "project_members" created.');
+
+    // 5. task_comments テーブル作成 (コメント機能用)
+    await client.query(`
+      CREATE TABLE task_comments (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        content TEXT NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Table "task_comments" created.');
 
     // --- テストデータの投入 ---
     // ① テナントの作成

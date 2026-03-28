@@ -14,4 +14,7 @@ router.post('/', taskController.createTask);
 router.put('/:id', taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);
 
+router.get('/:id/comments', taskController.getComments);
+router.post('/:id/comments', taskController.addComment);
+
 export default router;

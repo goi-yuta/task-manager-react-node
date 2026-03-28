@@ -51,7 +51,7 @@ export const taskController = {
   async createTask(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;
     const userId = req.user?.userId;
-    const { title, project_id, assignee_id, start_date, due_date } = req.body;
+    const { title, project_id, assignee_id, start_date, due_date, description } = req.body;
 
     if (!title || !project_id) {
       res.status(400).json({ error: 'タイトルとプロジェクトIDは必須です' });
@@ -81,9 +81,9 @@ export const taskController = {
       }
 
       const result = await pool.query(
-        `INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, start_date, due_date, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
-        [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, userId]
+        `INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, start_date, due_date, description, created_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+        [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, description || null, userId]
       );
       res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -104,7 +104,7 @@ export const taskController = {
       return;
     }
 
-    const allowedFields = ['status', 'title', 'start_date', 'due_date', 'assignee_id'];
+    const allowedFields = ['status', 'title', 'start_date', 'due_date', 'assignee_id', 'description'];
     const updates: string[] = [];
     const values: any[] = [];
 
@@ -147,7 +147,8 @@ export const taskController = {
       }
       res.status(500).json({ error: 'タスクの更新に失敗しました' });
     }
-    },
+  },
+
   // タスクの削除（論理削除）（Owner または Editor のみ可能）
   async deleteTask(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;
@@ -176,6 +177,80 @@ export const taskController = {
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'タスクの削除に失敗しました' });
+    }
+  },
+
+  // コメント一覧の取得
+  async getComments(req: AuthRequest, res: Response): Promise<void> {
+    const taskId = req.params.id;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+
+    try {
+      // 自分がこのタスクの属するプロジェクトのメンバーかチェック
+      const accessCheck = await pool.query(
+        `SELECT pm.role FROM tasks t
+         INNER JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3`,
+        [taskId, tenantId, userId]
+      );
+
+      if (accessCheck.rows.length === 0) {
+        res.status(403).json({ error: 'アクセス権限がありません' });
+        return;
+      }
+
+      // コメントと投稿者の名前を結合して取得
+      const result = await pool.query(
+        `SELECT tc.id, tc.content, tc.created_at, u.name as user_name
+         FROM task_comments tc
+         LEFT JOIN users u ON tc.user_id = u.id
+         WHERE tc.task_id = $1
+         ORDER BY tc.created_at ASC`,
+        [taskId]
+      );
+      res.json({ comments: result.rows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'コメントの取得に失敗しました' });
+    }
+  },
+
+  // コメントの追加
+  async addComment(req: AuthRequest, res: Response): Promise<void> {
+    const taskId = req.params.id;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const { content } = req.body;
+
+    if (!content) {
+      res.status(400).json({ error: 'コメント内容が必要です' });
+      return;
+    }
+
+    try {
+      // Viewer権限はコメントできないようにチェック
+      const accessCheck = await pool.query(
+        `SELECT pm.role FROM tasks t
+         INNER JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3`,
+        [taskId, tenantId, userId]
+      );
+
+      if (accessCheck.rows.length === 0 || accessCheck.rows[0].role === 'Viewer') {
+        res.status(403).json({ error: 'コメントを投稿する権限がありません' });
+        return;
+      }
+
+      const result = await pool.query(
+        `INSERT INTO task_comments (task_id, user_id, content)
+         VALUES ($1, $2, $3) RETURNING *`,
+        [taskId, userId, content]
+      );
+      res.status(201).json({ message: 'コメントを追加しました', comment: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'コメントの追加に失敗しました' });
     }
   }
 };

@@ -434,9 +434,9 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
         onSave={async (updates) => {
           if (editingTask) {
             await editTask(editingTask.id, updates);
-            setEditingTask(null);
           }
         }}
+        apiFetch={apiFetch}
       />
     </div>
   );
