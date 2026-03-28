@@ -205,12 +205,12 @@ export const taskController = {
       const accessCheck = await pool.query(
         `SELECT pm.role FROM tasks t
          INNER JOIN project_members pm ON t.project_id = pm.project_id
-         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3`,
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3 AND t.deleted_at IS NULL`,
         [taskId, tenantId, userId]
       );
 
       if (accessCheck.rows.length === 0) {
-        res.status(403).json({ error: 'アクセス権限がありません' });
+        res.status(403).json({ error: 'アクセス権限がないか、タスクが削除されています' });
         return;
       }
 
@@ -247,12 +247,12 @@ export const taskController = {
       const accessCheck = await pool.query(
         `SELECT pm.role FROM tasks t
          INNER JOIN project_members pm ON t.project_id = pm.project_id
-         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3`,
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3 AND t.deleted_at IS NULL`,
         [taskId, tenantId, userId]
       );
 
       if (accessCheck.rows.length === 0 || accessCheck.rows[0].role === 'Viewer') {
-        res.status(403).json({ error: 'コメントを投稿する権限がありません' });
+        res.status(403).json({ error: 'コメントを投稿する権限がないか、タスクが削除されています' });
         return;
       }
 

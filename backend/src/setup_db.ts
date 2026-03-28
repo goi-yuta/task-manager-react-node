@@ -108,6 +108,11 @@ async function setupDatabase() {
     `);
     console.log('✅ Table "task_comments" created.');
 
+    await client.query(`
+      CREATE INDEX idx_task_comments_task_id ON task_comments(task_id);
+    `);
+    console.log('✅ Index "idx_task_comments_task_id" created.');
+
     // --- テストデータの投入 ---
     // ① テナントの作成
     const tenantRes = await client.query(`

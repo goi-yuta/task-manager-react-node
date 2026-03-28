@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft, CheckCircle2, CircleDot, Circle, MessageSquare, Send } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import DOMPurify from 'dompurify';
+import { X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft, CheckCircle2, CircleDot, Circle, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { TASK_STATUS, type Task, type ProjectMember, type TaskStatus } from '../types';
 import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -21,8 +22,8 @@ interface TaskEditModalProps {
   users: ProjectMember[];
   onSave: (updates: { title: string; status?: TaskStatus; assignee_id: number | null; start_date: string | null; due_date: string | null; description: string | null; }) => Promise<void>;
   currentUserRole?: string;
-  apiFetch?: any;
-  currentUserId?: number
+  apiFetch?: (endpoint: string, options?: RequestInit) => Promise<Response>;
+  currentUserId?: number;
 }
 
 const MentionList = React.forwardRef((props: any, ref) => {
@@ -311,23 +312,28 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
         commentEditor.setEditable(!isViewer);
         setIsCommentEmpty(true);
       }
-
-      if (apiFetch) {
-        fetchComments();
-      }
     }
-  }, [task, isOpen, editor, commentEditor, isViewer, apiFetch]);
+  }, [task, isOpen, editor, commentEditor, isViewer]);
 
-  const fetchComments = async () => {
+  const fetchComments = useCallback(async () => {
     if (!task || !apiFetch) return;
+    setIsCommentLoading(true);
     try {
       const res = await apiFetch(`/tasks/${task.id}/comments`);
       const data = await res.json();
       setComments(data.comments || []);
     } catch (err: any) {
       console.error('コメントの取得に失敗しました', err);
+    } finally {
+      setIsCommentLoading(false);
     }
-  };
+  }, [task?.id, apiFetch]);
+
+  useEffect(() => {
+    if (task?.id && isOpen && apiFetch) {
+      fetchComments();
+    }
+  }, [task?.id, isOpen, apiFetch, fetchComments]);
 
   const handlePostComment = async () => {
     if (!commentEditor || isCommentEmpty || !task || !apiFetch || isViewer) return;
@@ -533,29 +539,35 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
 
             {/* コメント一覧 */}
             <div className="space-y-6 mb-8">
-              {comments.map(comment => {
-                const date = new Date(comment.created_at);
-                const isSystemMsg = !comment.user_name;
-                return (
-                  <div key={comment.id} className="flex gap-3">
-                    <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
-                      {isSystemMsg ? '?' : comment.user_name.charAt(0)}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-baseline gap-2 mb-1">
-                        <span className="font-bold text-sm text-slate-800">{comment.user_name || '不明なユーザー'}</span>
-                        <span className="text-xs text-slate-400">{date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      <div
-                        className={commentDisplayClasses}
-                        dangerouslySetInnerHTML={{ __html: comment.content }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-              {comments.length === 0 && (
+              {isCommentLoading ? (
+                <div className="flex justify-center items-center py-8">
+                  <Loader2 className="w-6 h-6 text-indigo-400 animate-spin" />
+                  <span className="ml-2 text-sm font-bold text-slate-500">コメントを読み込み中...</span>
+                </div>
+              ) : comments.length === 0 ? (
                 <p className="text-sm text-slate-400 text-center py-4">まだコメントはありません。タスクに関する相談やメモを残しましょう。</p>
+              ) : (
+                comments.map(comment => {
+                  const date = new Date(comment.created_at);
+                  const isSystemMsg = !comment.user_name;
+                  return (
+                    <div key={comment.id} className="flex gap-3">
+                      <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
+                        {isSystemMsg ? '?' : comment.user_name.charAt(0)}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-baseline gap-2 mb-1">
+                          <span className="font-bold text-sm text-slate-800">{comment.user_name || '不明なユーザー'}</span>
+                          <span className="text-xs text-slate-400">{date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </div>
+                        <div
+                          className={commentDisplayClasses}
+                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.content) }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
 

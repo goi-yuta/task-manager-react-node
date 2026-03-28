@@ -48,3 +48,5 @@ CREATE TABLE task_comments (
     content TEXT NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX idx_task_comments_task_id ON task_comments(task_id);
