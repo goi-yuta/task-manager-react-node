@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft, CheckCircle2, CircleDot, Circle, MessageSquare, Send } from 'lucide-react';
 import { TASK_STATUS, type Task, type ProjectMember, type TaskStatus } from '../types';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import Mention from '@tiptap/extension-mention';
+import Placeholder from '@tiptap/extension-placeholder';
+import tippy from 'tippy.js';
 
 interface TaskComment {
   id: number;
@@ -19,7 +22,129 @@ interface TaskEditModalProps {
   onSave: (updates: { title: string; status?: TaskStatus; assignee_id: number | null; start_date: string | null; due_date: string | null; description: string | null; }) => Promise<void>;
   currentUserRole?: string;
   apiFetch?: any;
+  currentUserId?: number
 }
+
+const MentionList = React.forwardRef((props: any, ref) => {
+  const [selectedIndex, setSelectedIndex] = useState(0);
+
+  const selectItem = (index: number) => {
+    const item = props.items[index];
+    if (item) {
+      props.command({ id: item.id, label: item.name });
+    }
+  };
+
+  const upHandler = () => {
+    setSelectedIndex((selectedIndex + props.items.length - 1) % props.items.length);
+  };
+
+  const downHandler = () => {
+    setSelectedIndex((selectedIndex + 1) % props.items.length);
+  };
+
+  const enterHandler = () => {
+    selectItem(selectedIndex);
+  };
+
+  useEffect(() => setSelectedIndex(0), [props.items]);
+
+  React.useImperativeHandle(ref, () => ({
+    onKeyDown: ({ event }: { event: KeyboardEvent }) => {
+      if (event.key === 'ArrowUp') {
+        upHandler();
+        return true;
+      }
+      if (event.key === 'ArrowDown') {
+        downHandler();
+        return true;
+      }
+      if (event.key === 'Enter') {
+        enterHandler();
+        return true;
+      }
+      return false;
+    },
+  }));
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl border border-slate-200 overflow-hidden w-56 text-sm z-[9999]">
+      {props.items.length > 0 ? (
+        props.items.map((item: any, index: number) => (
+          <button
+            className={`w-full text-left px-4 py-2.5 flex items-center gap-3 transition-colors ${index === selectedIndex ? 'bg-indigo-50 text-indigo-700 font-bold' : 'text-slate-700 hover:bg-slate-50'}`}
+            key={index}
+            onClick={() => selectItem(index)}
+          >
+            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${index === selectedIndex ? 'bg-indigo-200 text-indigo-800' : 'bg-slate-100 text-slate-500'}`}>
+              {item.name.charAt(0)}
+            </div>
+            <span className="truncate">{item.name}</span>
+          </button>
+        ))
+      ) : (
+        <div className="px-4 py-3 text-slate-400 text-center text-xs">メンバーが見つかりません</div>
+      )}
+    </div>
+  );
+});
+
+const getSuggestion = (getUsers: () => ProjectMember[], currentUserId?: number) => ({
+  items: ({ query }: { query: string }) => {
+    const users = getUsers();
+    return users
+      .filter(item => item.id !== currentUserId)
+      .filter(item => item.name.toLowerCase().includes(query.toLowerCase()))
+      .slice(0, 5); // 最大5件までサジェスト
+  },
+  render: () => {
+    let component: ReactRenderer;
+    let popup: any;
+
+    return {
+      onStart: (props: any) => {
+        component = new ReactRenderer(MentionList, {
+          props,
+          editor: props.editor,
+        });
+
+        if (!props.clientRect) {
+          return;
+        }
+
+        popup = tippy('body', {
+          getReferenceClientRect: props.clientRect,
+          appendTo: () => document.body,
+          content: component.element,
+          showOnCreate: true,
+          interactive: true,
+          trigger: 'manual',
+          placement: 'bottom-start',
+        });
+      },
+      onUpdate(props: any) {
+        component.updateProps(props);
+        if (!props.clientRect) {
+          return;
+        }
+        popup[0].setProps({
+          getReferenceClientRect: props.clientRect,
+        });
+      },
+      onKeyDown(props: any) {
+        if (props.event.key === 'Escape') {
+          popup[0].hide();
+          return true;
+        }
+        return (component.ref as any)?.onKeyDown(props);
+      },
+      onExit() {
+        popup[0]?.destroy();
+        component?.destroy();
+      },
+    };
+  },
+});
 
 const MenuBar = ({ editor, disabled }: { editor: any, disabled: boolean }) => {
   if (!editor) return null;
@@ -63,7 +188,7 @@ const MenuBar = ({ editor, disabled }: { editor: any, disabled: boolean }) => {
   );
 };
 
-export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, task, users, onSave, currentUserRole, apiFetch }) => {
+export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, task, users, onSave, currentUserRole, apiFetch, currentUserId }) => {
   const [title, setTitle] = useState('');
   const [status, setStatus] = useState<TaskStatus>(TASK_STATUS.TODO);
   const [assigneeId, setAssigneeId] = useState<number | ''>('');
@@ -72,19 +197,90 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [comments, setComments] = useState<TaskComment[]>([]);
-  const [newComment, setNewComment] = useState('');
   const [isCommentLoading, setIsCommentLoading] = useState(false);
+  const [isCommentEmpty, setIsCommentEmpty] = useState(true);
 
   const isViewer = currentUserRole === 'Viewer';
 
+  const usersRef = useRef(users);
+  useEffect(() => {
+    usersRef.current = users;
+  }, [users])
+
+  const editorClasses = [
+    'prose prose-sm sm:prose-base max-w-none focus:outline-none min-h-[200px] p-4',
+    // リスト・見出し・段落のスタイル
+    '[&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5',
+    '[&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mb-4',
+    '[&_p]:mb-2',
+    // メンションのスタイル
+    '[&_.mention]:bg-indigo-100 [&_.mention]:text-indigo-700 [&_.mention]:px-1 [&_.mention]:py-0.5 [&_.mention]:mr-1 [&_.mention]:inline-block [&_.mention]:rounded-md [&_.mention]:font-bold [&_.mention]:cursor-pointer',
+    // プレースホルダーのスタイル
+    '[&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:text-slate-400 [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:h-0'
+  ].join(' ');
+
+  const commentEditorClasses = [
+    'prose prose-sm max-w-none focus:outline-none min-h-[44px] max-h-[200px] overflow-y-auto px-3 py-2.5 text-slate-800 bg-transparent',
+    // 段落のスタイル
+    '[&_p]:m-0',
+    // メンションのスタイル
+    '[&_.mention]:bg-indigo-100 [&_.mention]:text-indigo-700 [&_.mention]:px-1 [&_.mention]:py-0.5 [&_.mention]:mr-1 [&_.mention]:inline-block [&_.mention]:rounded-md [&_.mention]:font-bold',
+    // プレースホルダーのスタイル
+    '[&_.is-editor-empty:first-child::before]:content-[attr(data-placeholder)] [&_.is-editor-empty:first-child::before]:text-slate-400 [&_.is-editor-empty:first-child::before]:float-left [&_.is-editor-empty:first-child::before]:pointer-events-none [&_.is-editor-empty:first-child::before]:h-0'
+  ].join(' ');
+
+  const commentDisplayClasses = [
+    'text-sm text-slate-600 bg-white p-3 rounded-tr-xl rounded-b-xl border border-slate-200 shadow-sm whitespace-pre-wrap leading-relaxed',
+    'prose prose-sm max-w-none',
+    // メンションのスタイル (💡 inline-block を追加して余白を確実に効かせる)
+    '[&_.mention]:bg-indigo-100 [&_.mention]:text-indigo-700 [&_.mention]:px-1 [&_.mention]:py-0.5 [&_.mention]:mr-1 [&_.mention]:inline-block [&_.mention]:rounded-md [&_.mention]:font-bold',
+    '[&_p]:m-0'
+  ].join(' ');
+
+  // 説明文用エディタの初期化
   const editor = useEditor({
-    extensions: [StarterKit],
+    extensions: [
+      StarterKit,
+      Placeholder.configure({
+        placeholder: 'タスクの詳細な説明を記入... (@でメンバーをメンションできます)',
+        emptyEditorClass: 'is-editor-empty',
+      }),
+      Mention.configure({
+        HTMLAttributes: { class: 'mention' },
+        suggestion: getSuggestion(() => usersRef.current, currentUserId),
+      }),
+    ],
     content: '',
     editable: !isViewer,
     editorProps: {
       attributes: {
-        class: 'prose prose-sm sm:prose-base max-w-none focus:outline-none min-h-[200px] p-4 [&_ul]:list-disc [&_ul]:ml-5 [&_ol]:list-decimal [&_ol]:ml-5 [&_p]:mb-2 [&_h1]:text-2xl [&_h1]:font-bold [&_h1]:mb-4',
+        class: editorClasses,
       },
+    },
+  });
+
+  // コメント用エディタの初期化
+  const commentEditor = useEditor({
+    extensions: [
+      StarterKit,
+      Placeholder.configure({
+        placeholder: '質問や進捗をコメント... (@でメンション)',
+        emptyEditorClass: 'is-editor-empty',
+      }),
+      Mention.configure({
+        HTMLAttributes: { class: 'mention' },
+        suggestion: getSuggestion(() => usersRef.current, currentUserId),
+      }),
+    ],
+    content: '',
+    editable: !isViewer,
+    editorProps: {
+      attributes: {
+        class: commentEditorClasses,
+      },
+    },
+    onUpdate: ({ editor }) => {
+      setIsCommentEmpty(editor.getText().trim() === '');
     },
   });
 
@@ -110,11 +306,17 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
         editor.setEditable(!isViewer);
       }
 
+      if (commentEditor) {
+        commentEditor.commands.setContent('');
+        commentEditor.setEditable(!isViewer);
+        setIsCommentEmpty(true);
+      }
+
       if (apiFetch) {
         fetchComments();
       }
     }
-  }, [task, isOpen, editor, isViewer, apiFetch]);
+  }, [task, isOpen, editor, commentEditor, isViewer, apiFetch]);
 
   const fetchComments = async () => {
     if (!task || !apiFetch) return;
@@ -128,15 +330,16 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   };
 
   const handlePostComment = async () => {
-    if (!newComment.trim() || !task || !apiFetch || isViewer) return;
+    if (!commentEditor || isCommentEmpty || !task || !apiFetch || isViewer) return;
 
     setIsCommentLoading(true);
     try {
       await apiFetch(`/tasks/${task.id}/comments`, {
         method: 'POST',
-        body: JSON.stringify({ content: newComment })
+        body: JSON.stringify({ content: commentEditor.getHTML() })
       });
-      setNewComment('');
+      commentEditor.commands.setContent('');
+      setIsCommentEmpty(true);
       await fetchComments(); // 投稿後に再取得して表示を更新
     } catch (err: any) {
       alert(err.message);
@@ -310,7 +513,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
             </div>
           </div>
 
-          {/* リッチテキストエディタ（Tiptap） */}
+          {/* 説明セクション（Tiptap） */}
           <div className="flex flex-col mb-10">
             <label className="flex items-center gap-2 text-sm font-bold text-slate-700 mb-2">
               <AlignLeft className="w-4 h-4 text-slate-400" /> 詳細な説明
@@ -332,7 +535,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
             <div className="space-y-6 mb-8">
               {comments.map(comment => {
                 const date = new Date(comment.created_at);
-                const isSystemMsg = !comment.user_name; // 退職者などの場合
+                const isSystemMsg = !comment.user_name;
                 return (
                   <div key={comment.id} className="flex gap-3">
                     <div className="w-8 h-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold text-sm shrink-0">
@@ -343,9 +546,10 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
                         <span className="font-bold text-sm text-slate-800">{comment.user_name || '不明なユーザー'}</span>
                         <span className="text-xs text-slate-400">{date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className="text-sm text-slate-600 bg-white p-3 rounded-tr-xl rounded-b-xl border border-slate-200 shadow-sm whitespace-pre-wrap leading-relaxed">
-                        {comment.content}
-                      </div>
+                      <div
+                        className={commentDisplayClasses}
+                        dangerouslySetInnerHTML={{ __html: comment.content }}
+                      />
                     </div>
                   </div>
                 );
@@ -357,14 +561,9 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
 
             {/* 新規コメント投稿フォーム (Viewerは非表示) */}
             {!isViewer && (
-              <div className="flex gap-3 items-start bg-white p-4 rounded-xl border border-slate-200 shadow-sm focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-400 transition-all">
-                <textarea
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  placeholder="質問や進捗をコメント..."
-                  className="flex-1 min-h-[44px] max-h-[200px] text-sm resize-y outline-none py-1 text-slate-800 placeholder-slate-400"
-                  rows={2}
-                  disabled={isCommentLoading}
+              <div className="flex gap-3 items-end bg-white p-3 rounded-xl border border-slate-200 shadow-sm focus-within:border-indigo-400 focus-within:ring-1 focus-within:ring-indigo-400 transition-all">
+                <div
+                  className="flex-1 min-w-0"
                   onKeyDown={(e) => {
                     // Cmd+Enter or Ctrl+Enter で送信
                     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -372,11 +571,13 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
                       handlePostComment();
                     }
                   }}
-                />
+                >
+                  <EditorContent editor={commentEditor} className="w-full bg-transparent" />
+                </div>
                 <button
                   onClick={handlePostComment}
-                  disabled={!newComment.trim() || isCommentLoading}
-                  className="p-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shrink-0 mt-auto"
+                  disabled={!commentEditor || isCommentEmpty || isCommentLoading}
+                  className="p-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shrink-0 mb-0.5"
                   title="送信 (Cmd + Enter)"
                 >
                   <Send className="w-4 h-4" />
@@ -385,7 +586,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
             )}
           </div>
 
-          {isViewer && <p className="text-xs text-slate-400 mt-2 ml-1">※タスクを編集する権限がありません（Viewer権限です）</p>}
+          {isViewer && <p className="text-xs text-slate-400 mt-2 ml-1">※タスクを編集する権限、コメントを投稿する権限がありません（Viewer権限です）</p>}
         </div>
       </div>
     </div>

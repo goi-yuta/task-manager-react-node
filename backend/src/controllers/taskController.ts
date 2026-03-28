@@ -2,9 +2,12 @@ import { Response } from 'express';
 import { Pool, types } from 'pg';
 import { AuthRequest } from '../middleware/authMiddleware';
 
-// PostgreSQLのDATE型(OID: 1082)とTIMESTAMP型(OID: 1114)をDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
+// PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
-types.setTypeParser(1114, (stringValue) => stringValue);
+// PostgreSQLのTIMESTAMP型 (OID: 1114) は「UTC」として扱い、Dateオブジェクトに変換してからフロントに返す
+types.setTypeParser(1114, (stringValue) => {
+  return new Date(stringValue.replace(' ', 'T') + 'Z');
+});
 
 const pool = new Pool({
   user: process.env.DB_USER || 'admin',
@@ -23,7 +26,11 @@ export const taskController = {
 
     try {
       let query = `
-        SELECT t.*, u.name AS assignee_name, p.name AS project_name
+        SELECT
+           t.id, t.tenant_id, t.title, t.status, t.description, t.start_date,
+           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
+           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
+           u.name AS assignee_name, p.name AS project_name
         FROM tasks t
         LEFT JOIN users u ON t.assignee_id = u.id
         LEFT JOIN projects p ON t.project_id = p.id
@@ -82,7 +89,11 @@ export const taskController = {
 
       const result = await pool.query(
         `INSERT INTO tasks (tenant_id, title, status, project_id, assignee_id, start_date, due_date, description, created_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING
+           id, tenant_id, title, status, description, start_date,
+           TO_CHAR(due_date, 'YYYY-MM-DD') AS due_date,
+           project_id, assignee_id, created_by, created_at, deleted_at`,
         [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, description || null, userId]
       );
       res.status(201).json(result.rows[0]);
@@ -130,7 +141,10 @@ export const taskController = {
           AND pm.user_id = $${values.length + 3}
           AND pm.role IN ('Owner', 'Editor')
           AND tasks.deleted_at IS NULL
-        RETURNING tasks.*`;
+        RETURNING
+           tasks.id, tasks.tenant_id, tasks.title, tasks.status, tasks.description, tasks.start_date,
+           TO_CHAR(tasks.due_date, 'YYYY-MM-DD') AS due_date,
+           tasks.project_id, tasks.assignee_id, tasks.created_by, tasks.created_at, tasks.deleted_at`;
 
       const result = await pool.query(query, [...values, taskId, tenantId, userId]);
 

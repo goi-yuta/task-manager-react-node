@@ -437,6 +437,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
           }
         }}
         apiFetch={apiFetch}
+        currentUserId={user.id}
       />
     </div>
   );
