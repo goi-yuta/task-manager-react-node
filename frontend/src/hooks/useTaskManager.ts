@@ -10,7 +10,7 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
   const [filterStatus, setFilterStatus] = useState<string>('');
   const [filterAssignee, setFilterAssignee] = useState<string>('');
   const [filterKeyword, setFilterKeyword] = useState<string>('');
-  const [activeKeyword, setActiveKeyWord] = useState<string>('');
+  const [activeKeyword, setActiveKeyword] = useState<string>('');
 
   // タスクの取得
   const fetchTasks = useCallback(async () => {
@@ -28,7 +28,7 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
 
       if (filterStatus) params.append('status', filterStatus);
       if (filterAssignee) params.append('assigneeId', filterAssignee);
-      if (filterKeyword) params.append('keyword', activeKeyword);
+      if (activeKeyword) params.append('keyword', activeKeyword);
 
       const res = await apiFetch(`/tasks?${params.toString()}`);
       const data = await res.json();
@@ -47,7 +47,7 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
 
   // 外部からキーワード検索を実行する関数
   const executeSearch = () => {
-    setActiveKeyWord(filterKeyword);
+    setActiveKeyword(filterKeyword);
   }
 
   // フィルターをリセットする関数
@@ -55,7 +55,7 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
     setFilterStatus('');
     setFilterAssignee('');
     setFilterKeyword('');
-    setActiveKeyWord('');
+    setActiveKeyword('');
   }
 
   // タスクの追加
