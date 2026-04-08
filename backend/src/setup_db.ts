@@ -20,6 +20,7 @@ async function setupDatabase() {
 
     // 依存関係を考慮して削除 (子テーブルから先に削除)
     await client.query('DROP TABLE IF EXISTS project_members;');
+    await client.query('DROP TABLE IF EXISTS task_attachments;');
     await client.query('DROP TABLE IF EXISTS task_comments;');
     await client.query('DROP TABLE IF EXISTS tasks;');
     await client.query('DROP TABLE IF EXISTS projects;');
@@ -112,6 +113,26 @@ async function setupDatabase() {
       CREATE INDEX idx_task_comments_task_id ON task_comments(task_id);
     `);
     console.log('✅ Index "idx_task_comments_task_id" created.');
+
+    // 6. task_attachments テーブル作成 (ファイル添付機能用)
+    await client.query(`
+      CREATE TABLE task_attachments (
+        id SERIAL PRIMARY KEY,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        original_name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_type TEXT,
+        file_size INTEGER,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    console.log('✅ Table "task_attachments" created.');
+
+    await client.query(`
+      CREATE INDEX idx_task_attachments_task_id ON task_attachments(task_id);
+    `);
+    console.log('✅ Index "idx_task_attachments_task_id" created.');
 
     // --- テストデータの投入 ---
     // ① テナントの作成

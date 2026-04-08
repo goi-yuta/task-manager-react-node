@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import authRoutes from './routes/authRoutes';
 import taskRoutes from './routes/taskRoutes';
 import userRoutes from './routes/userRoutes';
@@ -10,7 +11,7 @@ import { pool } from './db';
 dotenv.config();
 
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 // CORSの許可
 app.use(cors({
@@ -47,6 +48,10 @@ app.use('/auth', authRoutes);
 app.use('/tasks', taskRoutes);
 app.use('/users', userRoutes);
 app.use('/projects', projectRoutes);
+
+// サーバーに保存したファイル（画像など）をフロントエンドからURLで参照できるようにする
+// 例: http://localhost:3000/uploads/xxxx.jpg で画像が表示されるようになります
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 app.listen(port, () => {
   console.log(`Server is running on http://localhost:${port}`);

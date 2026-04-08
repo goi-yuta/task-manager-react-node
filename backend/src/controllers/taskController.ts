@@ -1,5 +1,7 @@
 import { Response } from 'express';
 import { Pool, types } from 'pg';
+import fs from 'fs';
+import path from 'path';
 import { AuthRequest } from '../middleware/authMiddleware';
 
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
@@ -288,6 +290,129 @@ export const taskController = {
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'コメントの追加に失敗しました' });
+    }
+  },
+
+  // 添付ファイル一覧を取得
+  async getAttachments(req: AuthRequest, res: Response): Promise<void> {
+    const taskId = req.params.id;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+
+    try {
+      const accessCheck = await pool.query(
+        `SELECT pm.role FROM tasks t
+         INNER JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3 AND t.deleted_at IS NULL`,
+        [taskId, tenantId, userId]
+      );
+
+      if (accessCheck.rows.length === 0) {
+        res.status(403).json({ error: 'アクセス権限がありません' });
+        return;
+      }
+
+      const result = await pool.query(
+        `SELECT id, original_name, file_path, file_type, file_size, created_at
+         FROM task_attachments
+         WHERE task_id = $1
+         ORDER BY created_at DESC`,
+        [taskId]
+      );
+      res.json({ attachments: result.rows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: '添付ファイルの取得に失敗しました' });
+    }
+  },
+
+  // 添付ファイルのアップロード
+  async uploadAttachment(req: AuthRequest, res: Response): Promise<void> {
+    const taskId = req.params.id;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const file = req.file;
+
+    if (!file) {
+      res.status(400).json({ error: 'ファイルがアップロードされていません' });
+      return;
+    }
+
+    const originalName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    const filePath = `/uploads/${file.filename}`;
+    const fileMimeType = file.mimetype;
+    const fileSize = file.size;
+
+    try {
+      const accessCheck = await pool.query(
+        `SELECT pm.role FROM tasks t
+         INNER JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3 AND t.deleted_at IS NULL`,
+        [taskId, tenantId, userId]
+      );
+
+      if (accessCheck.rows.length === 0 || accessCheck.rows[0].role === 'Viewer') {
+        res.status(403).json({ error: 'ファイルを添付する権限がありません' });
+        return;
+      }
+
+      const result = await pool.query(
+        `INSERT INTO task_attachments (task_id, user_id, original_name, file_path, file_type, file_size)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [taskId, userId, originalName, filePath, fileMimeType, fileSize]
+      );
+
+      res.status(201).json({ message: 'ファイルを添付しました', attachment: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'ファイルの添付に失敗しました' });
+    }
+  },
+
+  // 添付ファイルの削除（DBとディスクの両方から削除）
+  async deleteAttachment(req: AuthRequest, res: Response): Promise<void> {
+    const taskId = req.params.id;
+    const attachmentId = req.params.attachmentId;
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+
+    try {
+      const accessCheck = await pool.query(
+        `SELECT pm.role FROM tasks t
+         INNER JOIN project_members pm ON t.project_id = pm.project_id
+         WHERE t.id = $1 AND t.tenant_id = $2 AND pm.user_id = $3 AND t.deleted_at IS NULL`,
+        [taskId, tenantId, userId]
+      );
+
+      if (accessCheck.rows.length === 0 || accessCheck.rows[0].role === 'Viewer') {
+        res.status(403).json({ error: 'ファイルを削除する権限がありません' });
+        return;
+      }
+
+      // DBからファイル情報を取得
+      const attachment = await pool.query(
+        'SELECT file_path FROM task_attachments WHERE id = $1 AND task_id = $2',
+        [attachmentId, taskId]
+      );
+
+      if (attachment.rows.length === 0) {
+        res.status(404).json({ error: 'ファイルが見つかりません' });
+        return;
+      }
+
+      // サーバーのディスクから削除
+      const absolutePath = path.join(__dirname, '../..', attachment.rows[0].file_path);
+      if (fs.existsSync(absolutePath)) {
+        fs.unlinkSync(absolutePath);
+      }
+
+      // DBから削除
+      await pool.query('DELETE FROM task_attachments WHERE id = $1', [attachmentId]);
+
+      res.json({ message: 'ファイルを削除しました' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'ファイルの削除に失敗しました' });
     }
   }
 };

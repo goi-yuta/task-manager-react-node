@@ -50,3 +50,16 @@ CREATE TABLE task_comments (
 );
 
 CREATE INDEX idx_task_comments_task_id ON task_comments(task_id);
+
+CREATE TABLE task_attachments (
+  id SERIAL PRIMARY KEY,
+  task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  original_name TEXT NOT NULL,
+  file_path TEXT NOT NULL,
+  file_type TEXT,
+  file_size INTEGER,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_task_attachments_task_id ON task_attachments(task_id);

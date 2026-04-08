@@ -1,12 +1,17 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DOMPurify from 'dompurify';
-import { X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft, CheckCircle2, CircleDot, Circle, MessageSquare, Send, Loader2 } from 'lucide-react';
 import { TASK_STATUS, type Task, type ProjectMember, type TaskStatus } from '../types';
 import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Mention from '@tiptap/extension-mention';
 import Placeholder from '@tiptap/extension-placeholder';
 import tippy from 'tippy.js';
+import {
+  X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft,
+  CheckCircle2, CircleDot, Circle, MessageSquare, Send, Loader2,
+  Paperclip, Trash2, File, Plus
+} from 'lucide-react';
+import { API_BASE } from '../config';
 
 interface TaskComment {
   id: number;
@@ -24,6 +29,15 @@ interface TaskEditModalProps {
   currentUserRole?: string;
   apiFetch?: (endpoint: string, options?: RequestInit) => Promise<Response>;
   currentUserId?: number;
+}
+
+interface TaskAttachment {
+  id: number;
+  original_name: string;
+  file_path: string;
+  file_type: string;
+  file_size: number;
+  created_at: string;
 }
 
 const MentionList = React.forwardRef((props: any, ref) => {
@@ -200,6 +214,10 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   const [comments, setComments] = useState<TaskComment[]>([]);
   const [isCommentLoading, setIsCommentLoading] = useState(false);
   const [isCommentEmpty, setIsCommentEmpty] = useState(true);
+  const [attachments, setAttachments] = useState<TaskAttachment[]>([]);
+  const [isAttachmentLoading, setIsAttachmentLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const isViewer = currentUserRole === 'Viewer';
 
@@ -233,7 +251,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   const commentDisplayClasses = [
     'text-sm text-slate-600 bg-white p-3 rounded-tr-xl rounded-b-xl border border-slate-200 shadow-sm whitespace-pre-wrap leading-relaxed',
     'prose prose-sm max-w-none',
-    // メンションのスタイル (💡 inline-block を追加して余白を確実に効かせる)
+    // メンションのスタイル
     '[&_.mention]:bg-indigo-100 [&_.mention]:text-indigo-700 [&_.mention]:px-1 [&_.mention]:py-0.5 [&_.mention]:mr-1 [&_.mention]:inline-block [&_.mention]:rounded-md [&_.mention]:font-bold',
     '[&_p]:m-0'
   ].join(' ');
@@ -316,7 +334,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   }, [task, isOpen, editor, commentEditor, isViewer]);
 
   const fetchComments = useCallback(async () => {
-    if (!task || !apiFetch) return;
+    if (!task?.id || !apiFetch) return;
     setIsCommentLoading(true);
     try {
       const res = await apiFetch(`/tasks/${task.id}/comments`);
@@ -329,14 +347,76 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
     }
   }, [task?.id, apiFetch]);
 
+  const fetchAttachments = useCallback(async () => {
+    if (!task?.id || !apiFetch) return;
+
+    setIsAttachmentLoading(true);
+    try {
+      const res = await apiFetch(`/tasks/${task.id}/attachments`);
+      const data = await res.json();
+      setAttachments(data.attachments || []);
+    } catch (err: any) {
+      console.error('添付ファイルの取得に失敗しました', err);
+    } finally {
+      setIsAttachmentLoading(false);
+    }
+  }, [task?.id, apiFetch]);
+
   useEffect(() => {
     if (task?.id && isOpen && apiFetch) {
       fetchComments();
+      fetchAttachments();
     }
-  }, [task?.id, isOpen, apiFetch, fetchComments]);
+  }, [task?.id, isOpen, apiFetch, fetchComments, fetchAttachments]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0 || !task?.id || !apiFetch || isViewer) return;
+    const file = e.target.files[0];
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('ファイルサイズは10MB以下にしてください。')
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      // multipart/form-data 形式で送信するため、FormData オブジェクトを生成
+      const formData = new FormData();
+
+      formData.append('file', file);
+
+      await apiFetch(`/tasks/${task.id}/attachments`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      await fetchAttachments();
+    } catch (err: any) {
+      alert(err.message);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleDeleteAttachment = async (attachmentId: number) => {
+    if (!task?.id || !apiFetch) return;
+
+    if (!window.confirm('この添付ファイルを削除してもよろしいですか？')) return;
+    try {
+      await apiFetch(`/tasks/${task.id}/attachments/${attachmentId}`, {
+        method: 'DELETE'
+      });
+      await fetchAttachments();
+    } catch (err: any) {
+      alert(err.message);
+    }
+  };
 
   const handlePostComment = async () => {
-    if (!commentEditor || isCommentEmpty || !task || !apiFetch || isViewer) return;
+    if (!commentEditor || isCommentEmpty || !task?.id || !apiFetch || isViewer) return;
 
     setIsCommentLoading(true);
     try {
@@ -390,6 +470,14 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
     if (s === TASK_STATUS.DONE) return <CheckCircle2 className="w-5 h-5 text-emerald-500" />;
     if (s === TASK_STATUS.DOING) return <CircleDot className="w-5 h-5 text-blue-500" />;
     return <Circle className="w-5 h-5 text-slate-300" />;
+  };
+
+  const formatFileSize = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat(((bytes / Math.pow(k, i)).toFixed(2))) + ' ' + sizes[i];
   };
 
   return (
@@ -528,6 +616,66 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
               <MenuBar editor={editor} disabled={isViewer || isSubmitting} />
               <EditorContent editor={editor} className="bg-white" />
             </div>
+          </div>
+
+          {/* ファイル添付セクション */}
+          <div className="mt-8 pt-8 border-t border-slate-200">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="flex items-center gap-2 text-lg font-bold text-slate-800">
+                <Paperclip className="w-5 h-5 text-indigo-500" />
+                添付ファイル ({attachments.length})
+              </h3>
+              {!isViewer && (
+                <div>
+                  <input
+                    type="file"
+                    className="hidden"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                  />
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploading}
+                    className="text-sm px-3 py-1.5 bg-indigo-50 text-indigo-600 font-bold rounded-lg hover:bg-indigo-100 flex items-center gap-1.5 disabled:opacity-50 transition-colors shadow-sm"
+                  >
+                    {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                    {isUploading ? 'アップロード中...' : 'ファイルを追加'}
+                  </button>
+                </div>
+              )}
+            </div>
+            {isAttachmentLoading ? (
+              <div className="flex justify-center items-center py-6">
+                <Loader2 className="w-5 h-5 text-indigo-400 animate-spin" />
+              </div>
+            ) : attachments.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-6 bg-white rounded-xl border border-slate-200 border-dashed">添付されたファイルはありません</p>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                {attachments.map(att => (
+                  <div key={att.id} className="border border-slate-200 rounded-xl p-3 flex items-start gap-3 bg-white shadow-sm hover:border-indigo-300 transition-colors group">
+                    <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 shrink-0 overflow-hidden border border-indigo-100/50">
+                      {att.file_type?.startsWith('image/') ? (
+                        <img src={`${API_BASE}${att.file_path}`} alt={att.original_name} className="w-full h-full object-cover" />
+                      ) : (
+                        <File className="w-5 h-5" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0 flex flex-col justify-center h-10">
+                      <a href={`${API_BASE}${att.file_path}`} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-slate-700 hover:text-indigo-600 truncate block transition-colors">
+                        {att.original_name}
+                      </a>
+                      <p className="text-xs text-slate-400 mt-0.5">{formatFileSize(att.file_size)} • {new Date(att.created_at).toLocaleDateString()}</p>
+                    </div>
+                    {!isViewer && (
+                      <button onClick={() => handleDeleteAttachment(att.id)} className="p-1.5 text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0" title="削除">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* コメントセクション */}

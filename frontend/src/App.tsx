@@ -9,6 +9,7 @@ import { GanttChart } from './components/GanttChart';
 import { useTaskManager } from './hooks/useTaskManager';
 import { type UserData, type ProjectData, type SortOrder, type ProjectMember, type Task } from './types';
 import { CheckCircle2, RefreshCw, AlertCircle, Plus, LogOut, Folder, Mail, Lock, UserPlus, LayoutList, KanbanSquare } from 'lucide-react';
+import { API_BASE } from './config';
 
 // ==========================================
 // 1. 認証カスタムフック (Auth Logic)
@@ -19,7 +20,7 @@ const useAuth = () => {
 
   // ログイン処理
   const login = async (email: string, password: string) => {
-    const res = await fetch('http://localhost:3000/auth/login', {
+    const res = await fetch(`${API_BASE}/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email, password }),
@@ -46,13 +47,21 @@ const useAuth = () => {
   // 認証トークンを自動で付与する fetch ラッパー
   const apiFetch = useCallback(async (endpoint: string, options: RequestInit = {}) => {
     const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
       ...((options.headers as Record<string, string>) || {}),
     };
+
+    if (options.body instanceof FormData) {
+      delete headers['Content-Type'];
+    } else {
+      if (!headers['Content-Type']) {
+        headers['Content-Type'] = 'application/json';
+      }
+    }
+
     if (token) {
       headers['Authorization'] = `Bearer ${token}`;
     }
-    const res = await fetch(`http://localhost:3000${endpoint}`, { ...options, headers });
+    const res = await fetch(`${API_BASE}${endpoint}`, { ...options, headers });
 
     // トークンが無効な場合は強制ログアウト
     if (res.status === 401 || res.status === 403) {
