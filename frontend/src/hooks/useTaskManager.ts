@@ -7,16 +7,30 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
   const [error, setError] = useState<string | null>(null);
   const [sortOrder, setSortOrder] = useState<SortOrder>('default');
 
+  const [filterStatus, setFilterStatus] = useState<string>('');
+  const [filterAssignee, setFilterAssignee] = useState<string>('');
+  const [filterKeyword, setFilterKeyword] = useState<string>('');
+  const [activeKeyword, setActiveKeyWord] = useState<string>('');
+
   // タスクの取得
   const fetchTasks = useCallback(async () => {
     if (!currentProjectId) {
       setTasks([]);
       return;
     }
+
     try {
       setLoading(true);
       setError(null);
-      const res = await apiFetch(`/tasks?projectId=${currentProjectId}`);
+
+      const params = new URLSearchParams();
+      params.append('projectId', currentProjectId.toString());
+
+      if (filterStatus) params.append('status', filterStatus);
+      if (filterAssignee) params.append('assigneeId', filterAssignee);
+      if (filterKeyword) params.append('keyword', activeKeyword);
+
+      const res = await apiFetch(`/tasks?${params.toString()}`);
       const data = await res.json();
       setTasks(data.tasks);
     } catch (err: any) {
@@ -24,15 +38,27 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
     } finally {
       setLoading(false);
     }
-  }, [apiFetch, currentProjectId]);
+  }, [apiFetch, currentProjectId, filterStatus, filterAssignee, activeKeyword]);
 
-  // プロジェクトが切り替わった時にタスクを再取得
+  // プロジェクトが切り替わった時、またはフィルターが変わった時にタスクを再取得
   useEffect(() => {
     fetchTasks();
   }, [fetchTasks]);
 
+  // 外部からキーワード検索を実行する関数
+  const executeSearch = () => {
+    setActiveKeyWord(filterKeyword);
+  }
+
+  // フィルターをリセットする関数
+  const clearFilters = () => {
+    setFilterStatus('');
+    setFilterAssignee('');
+    setFilterKeyword('');
+    setActiveKeyWord('');
+  }
+
   // タスクの追加
-  // addTask に start_date と due_date を渡せるように引数を追加
   const addTask = async (title: string, assigneeId: number | '', start_date: string, due_date: string) => {
     if (!currentProjectId) return;
     try {
@@ -135,5 +161,10 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
     deleteTask,
     editTask,
     refreshTasks: fetchTasks,
+    filterStatus, setFilterStatus,
+    filterAssignee, setFilterAssignee,
+    filterKeyword, setFilterKeyword,
+    executeSearch,
+    clearFilters,
   };
 };

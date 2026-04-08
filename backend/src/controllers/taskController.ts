@@ -21,8 +21,9 @@ export const taskController = {
   // タスク一覧の取得（自分が参加しているプロジェクトのタスクのみ）
   async getAllTasks(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;
-    const projectId = req.query.projectId;
     const userId = req.user?.userId;
+
+    const { projectId, status, assigneeId, keyword } = req.query;
 
     try {
       let query = `
@@ -41,7 +42,29 @@ export const taskController = {
 
       if (projectId) {
         values.push(projectId);
-        query += ` AND t.project_id = $3`;
+        query += ` AND t.project_id = $${values.length}`;
+      }
+
+      if (status) {
+        values.push(status);
+        query += ` AND t.status = $${values.length}`;
+      }
+
+      if (assigneeId) {
+        if (assigneeId === 'me') {
+          values.push(userId);
+          query += ` AND t.assignee_id = $${values.length}`;
+        } else if (assigneeId === 'unassigned') {
+          query += ` AND t.assignee_id IS NULL`;
+        } else {
+          values.push(assigneeId);
+          query += ` AND t.assignee_id = $${values.length}`;
+        }
+      }
+
+      if (keyword && typeof keyword === 'string') {
+        values.push(`%${keyword}%`);
+        query += ` AND (t.title ILIKE $${values.length} OR t.description ILIKE $${values.length})`;
       }
 
       query += ` ORDER BY t.id ASC`; // 順序の保証

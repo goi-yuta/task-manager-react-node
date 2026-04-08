@@ -4,6 +4,7 @@ import { InviteUserModal } from './components/InviteUserModal';
 import { TaskEditModal } from './components/TaskEditModal';
 import { TaskForm } from './components/TaskForm';
 import { TaskItem } from './components/TaskItem';
+import { TaskFilterBar } from './components/TaskFilterBar';
 import { GanttChart } from './components/GanttChart';
 import { useTaskManager } from './hooks/useTaskManager';
 import { type UserData, type ProjectData, type SortOrder, type ProjectMember, type Task } from './types';
@@ -135,7 +136,7 @@ const AuthScreen: React.FC<{
 // ==========================================
 // 3. メインアプリケーション (ログイン後)
 // ==========================================
-const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, token: string }> = ({ user, logout, apiFetch, token }) => {
+const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, token: string }> = ({ user, logout, apiFetch }) => {
   const [projects, setProjects] = useState<ProjectData[]>([]);
   const [currentProjectId, setCurrentProjectId] = useState<number | null>(null);
   const [users, setUsers] = useState<UserData[]>([]);
@@ -152,18 +153,22 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
   const [initialLoading, setInitialLoading] = useState(true);
   const [globalError, setGlobalError] = useState<string | null>(null);
 
-  // 💡 カスタムフックを呼び出してタスク関連のロジックを取得
+  // カスタムフックを呼び出してタスク関連のロジックを取得
   const {
     tasks: displayedTasks,
     rawTasks,
     loading: tasksLoading,
     error: tasksError,
-    sortOrder,
-    setSortOrder,
+    sortOrder, setSortOrder,
     addTask,
     toggleTaskStatus,
     editTask,
-    deleteTask
+    deleteTask,
+    filterStatus, setFilterStatus,
+    filterAssignee, setFilterAssignee,
+    filterKeyword, setFilterKeyword,
+    executeSearch,
+    clearFilters
   } = useTaskManager(currentProjectId, apiFetch);
 
   // 初期データの取得（プロジェクト一覧とユーザー一覧）
@@ -344,6 +349,19 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
             {(currentUserRole === 'Owner' || currentUserRole === 'Editor') && (
               <TaskForm users={projectMembers} onAdd={addTask} />
             )}
+
+            <TaskFilterBar
+              filterStatus={filterStatus}
+              setFilterStatus={setFilterStatus}
+              filterAssignee={filterAssignee}
+              setFilterAssignee={setFilterAssignee}
+              filterKeyword={filterKeyword}
+              setFilterKeyword={setFilterKeyword}
+              executeSearch={executeSearch}
+              clearFilters={clearFilters}
+              projectMembers={projectMembers}
+              currentUserId={user.id}
+            />
 
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-4">
               <div className="flex items-center gap-4">
