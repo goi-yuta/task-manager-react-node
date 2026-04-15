@@ -22,4 +22,6 @@ router.get('/:id/attachments', taskController.getAttachments);
 router.post('/:id/attachments', upload.single('file'), taskController.uploadAttachment);
 router.delete('/:id/attachments/:attachmentId', taskController.deleteAttachment);
 
+router.get('/:id/logs', taskController.getTaskActivityLogs);
+
 export default router;

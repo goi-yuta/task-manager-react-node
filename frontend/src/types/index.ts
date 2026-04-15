@@ -6,6 +6,12 @@ export const TASK_STATUS = {
 
 export type TaskStatus = typeof TASK_STATUS[keyof typeof TASK_STATUS];
 
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  TODO: '未着手',
+  DOING: '進行中',
+  DONE: '完了',
+};
+
 export interface Task {
   id: number;
   title: string;

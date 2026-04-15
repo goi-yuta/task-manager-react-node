@@ -19,6 +19,7 @@ async function setupDatabase() {
     console.log('🔄 Database setup started...');
 
     // 依存関係を考慮して削除 (子テーブルから先に削除)
+    await client.query('DROP TABLE IF EXISTS activity_logs;');
     await client.query('DROP TABLE IF EXISTS project_members;');
     await client.query('DROP TABLE IF EXISTS task_attachments;');
     await client.query('DROP TABLE IF EXISTS task_comments;');
@@ -174,6 +175,26 @@ async function setupDatabase() {
     `, [tenantId, projectId, userId]);
 
     console.log('✅ Test data inserted successfully!');
+
+    const createActivityLogsTable = `
+      CREATE TABLE IF NOT EXISTS activity_logs (
+        id SERIAL PRIMARY KEY,
+        tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+        task_id INTEGER REFERENCES tasks(id) ON DELETE CASCADE,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        action VARCHAR(255) NOT NULL,
+        details JSONB,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+    `;
+
+    // 既存の query(createTasksTable) などの後に実行する
+    await pool.query(createActivityLogsTable);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_activity_logs_task_id ON activity_logs(task_id, tenant_id);
+    `);
+    console.log("✅ activity_logs table created successfully!");
 
   } catch (err) {
     console.error('❌ Error during setup:', err);

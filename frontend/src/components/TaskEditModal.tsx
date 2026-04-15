@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import DOMPurify from 'dompurify';
-import { TASK_STATUS, type Task, type ProjectMember, type TaskStatus } from '../types';
+import { TASK_STATUS, TASK_STATUS_LABEL, type Task, type ProjectMember, type TaskStatus } from '../types';
 import { useEditor, EditorContent, ReactRenderer } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Mention from '@tiptap/extension-mention';
 import Placeholder from '@tiptap/extension-placeholder';
 import tippy from 'tippy.js';
+import { TaskActivityLog } from './TaskActivityLog';
 import {
   X, Save, User, Calendar, Bold, Italic, List, ListOrdered, AlignLeft,
   CheckCircle2, CircleDot, Circle, MessageSquare, Send, Loader2,
@@ -218,6 +219,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   const [isAttachmentLoading, setIsAttachmentLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [refreshLogTrigger, setRefreshLogTrigger] = useState(0);
 
   const isViewer = currentUserRole === 'Viewer';
 
@@ -391,6 +393,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
       });
 
       await fetchAttachments();
+      setRefreshLogTrigger(prev => prev + 1);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -410,6 +413,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
         method: 'DELETE'
       });
       await fetchAttachments();
+      setRefreshLogTrigger(prev => prev + 1);
     } catch (err: any) {
       alert(err.message);
     }
@@ -427,6 +431,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
       commentEditor.commands.setContent('');
       setIsCommentEmpty(true);
       await fetchComments(); // 投稿後に再取得して表示を更新
+      setRefreshLogTrigger(prev => prev + 1);
     } catch (err: any) {
       alert(err.message);
     } finally {
@@ -458,6 +463,7 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
       });
 
       setIsSaved(true);
+      setRefreshLogTrigger(prev => prev + 1);
       setTimeout(() => setIsSaved(false), 2000);
     } catch (err: any) {
       // エラーハンドリングは親（App.tsx）で行う
@@ -556,9 +562,9 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
                   disabled={isViewer || isSubmitting}
                   className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-100 rounded-lg text-sm font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none appearance-none cursor-pointer disabled:opacity-70"
                 >
-                  <option value={TASK_STATUS.TODO}>未着手 (TODO)</option>
-                  <option value={TASK_STATUS.DOING}>進行中 (DOING)</option>
-                  <option value={TASK_STATUS.DONE}>完了 (DONE)</option>
+                  {Object.values(TASK_STATUS).map((s) => (
+                    <option key={s} value={s}>{TASK_STATUS_LABEL[s]} ({s})</option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -747,6 +753,12 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
           </div>
 
           {isViewer && <p className="text-xs text-slate-400 mt-2 ml-1">※タスクを編集する権限、コメントを投稿する権限がありません（Viewer権限です）</p>}
+
+          <TaskActivityLog
+            taskId={task.id}
+            apiFetch={apiFetch}
+            refreshTrigger={refreshLogTrigger}
+          />
         </div>
       </div>
     </div>

@@ -3,6 +3,7 @@ import { Pool, types } from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { logActivity } from '../utils/activityLogger';
 
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
@@ -121,7 +122,22 @@ export const taskController = {
            project_id, assignee_id, created_by, created_at, deleted_at`,
         [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, description || null, userId]
       );
-      res.status(201).json(result.rows[0]);
+
+      const newTask = result.rows[0];
+
+      if (tenantId && userId) {
+        await logActivity(
+          pool,
+          tenantId,
+          newTask.project_id,
+          newTask.id,
+          userId,
+          'TASK_CREATED',
+          { title: newTask.title }
+        );
+      }
+
+      res.status(201).json(newTask);
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'タスクの作成に失敗しました' });
@@ -157,6 +173,15 @@ export const taskController = {
     }
 
     try {
+      const oldTaskRes = await pool.query(
+        `SELECT status, title, assignee_id, description,
+          TO_CHAR(start_date, 'YYYY-MM-DD') AS start_date,
+          TO_CHAR(due_date, 'YYYY-MM-DD') AS due_date
+         FROM tasks WHERE id = $1 AND tenant_id = $2`,
+        [taskId, tenantId]
+      );
+      const oldTask = oldTaskRes.rows[0];
+
       const query = `
         UPDATE tasks
         SET ${updates.join(', ')}
@@ -177,7 +202,58 @@ export const taskController = {
         res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
         return;
       }
-      res.json(result.rows[0]);
+
+      const updatedTask = result.rows[0];
+
+      if (oldTask && tenantId && userId) {
+        const changes: Record<string, { old: any; new: any }> = {};
+
+        allowedFields.forEach((field) => {
+          if (Object.prototype.hasOwnProperty.call(body, field)) {
+            const oldVal = oldTask[field];
+            const newVal = body[field];
+
+            // 簡易比較：値が変わっていれば changes オブジェクトに差分を詰める
+            if (String(oldVal || '') !== String(newVal || '')) {
+              changes[field] = { old: oldVal, new: newVal };
+            }
+          }
+        });
+
+        // 実際に差分があった場合のみ、activity_logsにINSERT
+        if (Object.keys(changes).length > 0) {
+          // assignee_id が変わっていた場合、IDだけでなく担当者名も記録する
+          // assignee_id が変わっていた場合、表示用の担当者名を changes とは別に記録する
+          let assigneeName: { old: string | null; new: string | null } | undefined;
+          if (changes.assignee_id) {
+            const assigneeIds = [changes.assignee_id.old, changes.assignee_id.new].filter((id) => id != null);
+            const nameMap: Record<number, string> = {};
+            if (assigneeIds.length > 0) {
+              const usersRes = await pool.query(
+                `SELECT id, name FROM users WHERE id = ANY($1) AND tenant_id = $2`,
+                [assigneeIds, tenantId]
+              );
+              usersRes.rows.forEach((row) => { nameMap[row.id] = row.name; });
+            }
+            assigneeName = {
+              old: changes.assignee_id.old != null ? (nameMap[changes.assignee_id.old] ?? '不明') : null,
+              new: changes.assignee_id.new != null ? (nameMap[changes.assignee_id.new] ?? '不明') : null,
+            };
+          }
+
+          await logActivity(
+            pool,
+            tenantId,
+            updatedTask.project_id,
+            Number(taskId),
+            userId,
+            'TASK_UPDATED',
+            { changes, ...(assigneeName && { assignee_name: assigneeName }) }
+          );
+        }
+      }
+
+      res.json(updatedTask);
     } catch (err: any) {
       console.error(err);
       if (err.code === '23514') {
@@ -286,6 +362,15 @@ export const taskController = {
          VALUES ($1, $2, $3) RETURNING *`,
         [taskId, userId, content]
       );
+
+      const taskRow = await pool.query(`SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2`, [taskId, tenantId]);
+      if (tenantId && userId && taskRow.rows[0]) {
+        // HTMLタグを除去してコメント冒頭50文字をプレビューとして保存
+        const plainText = content.replace(/<[^>]*>/g, '').trim();
+        const preview = plainText.slice(0, 50);
+        await logActivity(pool, tenantId, taskRow.rows[0].project_id, Number(taskId), userId, 'COMMENT_ADDED', { preview });
+      }
+
       res.status(201).json({ message: 'コメントを追加しました', comment: result.rows[0] });
     } catch (err) {
       console.error(err);
@@ -362,6 +447,21 @@ export const taskController = {
         [taskId, userId, originalName, filePath, fileMimeType, fileSize]
       );
 
+      const taskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2', [taskId, tenantId]);
+      const projectId = taskRes.rows[0]?.project_id;
+
+      if (tenantId && projectId && userId) {
+        await logActivity(
+          pool,
+          tenantId,
+          projectId,
+          Number(taskId),
+          userId,
+          'FILE_ATTACHED',
+          { file_name: file.originalname } // JSONBで元のファイル名を記録
+        );
+      }
+
       res.status(201).json({ message: 'ファイルを添付しました', attachment: result.rows[0] });
     } catch (err) {
       console.error(err);
@@ -391,7 +491,7 @@ export const taskController = {
 
       // DBからファイル情報を取得
       const attachment = await pool.query(
-        'SELECT file_path FROM task_attachments WHERE id = $1 AND task_id = $2',
+        'SELECT file_path, original_name FROM task_attachments WHERE id = $1 AND task_id = $2',
         [attachmentId, taskId]
       );
 
@@ -409,10 +509,53 @@ export const taskController = {
       // DBから削除
       await pool.query('DELETE FROM task_attachments WHERE id = $1', [attachmentId]);
 
+      const taskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2', [taskId, tenantId]);
+      if (tenantId && userId && taskRes.rows[0]) {
+        await logActivity(
+          pool,
+          tenantId,
+          taskRes.rows[0].project_id,
+          Number(taskId),
+          userId,
+          'FILE_DELETED',
+          { file_name: attachment.rows[0].original_name }
+        );
+      }
+
       res.json({ message: 'ファイルを削除しました' });
     } catch (err) {
       console.error(err);
       res.status(500).json({ error: 'ファイルの削除に失敗しました' });
+    }
+  },
+
+  // タスクのアクティビティログを取得
+  async getTaskActivityLogs(req: AuthRequest, res: Response): Promise<void> {
+    const tenantId = req.user?.tenantId;
+    const taskId = req.params.id;
+
+    try {
+      // LEFT JOIN を使って「誰が操作したか」の名前も一緒に取ってくる
+      const query = `
+        SELECT
+          al.id,
+          al.action,
+          al.details,
+          al.created_at,
+          u.id AS user_id,
+          u.name AS user_name
+        FROM activity_logs al
+        LEFT JOIN users u ON al.user_id = u.id
+        WHERE al.task_id = $1 AND al.tenant_id = $2
+        ORDER BY al.created_at DESC
+      `;
+
+      const result = await pool.query(query, [taskId, tenantId]);
+
+      res.json(result.rows);
+    } catch (err: any) {
+      console.error('Failed to fetch activity logs:', err);
+      res.status(500).json({ error: 'アクティビティログの取得に失敗しました' });
     }
   }
 };

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TASK_STATUS, type ProjectMember } from '../types';
+import { TASK_STATUS, TASK_STATUS_LABEL, type ProjectMember } from '../types';
 import { Search, Filter } from 'lucide-react';
 
 interface TaskFilterBarProps {
@@ -35,9 +35,9 @@ export const TaskFilterBar: React.FC<TaskFilterBarProps> = ({
         className="px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500 transition-all cursor-pointer"
       >
         <option value="">すべてのステータス</option>
-        <option value={TASK_STATUS.TODO}>未着手 (TODO)</option>
-        <option value={TASK_STATUS.DOING}>進行中 (DOING)</option>
-        <option value={TASK_STATUS.DONE}>完了 (DONE)</option>
+        {Object.values(TASK_STATUS).map((s) => (
+          <option key={s} value={s}>{TASK_STATUS_LABEL[s]} ({s})</option>
+        ))}
       </select>
 
       <select
