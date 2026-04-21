@@ -52,8 +52,6 @@ io.on('connection', async (socket) => {
   const tenantRoom = `tenant_${user.tenantId}`;
   const userRoom = `user_${user.userId}`;
 
-  console.log(`User connected: ID ${user.userId} (Tenant: ${user.tenantId})`);
-
   // 基本のテナントルームと個人ルームに参加
   socket.join(tenantRoom);
   socket.join(userRoom);
@@ -65,16 +63,23 @@ io.on('connection', async (socket) => {
       [user.userId]
     );
     projectMembers.rows.forEach((row: any) => {
-      const projectRoom = `project_${row.project_id}`;
-      socket.join(projectRoom);
-      // console.log(`User ${user.userId} joined room: ${projectRoom}`);
+      socket.join(`project_${row.project_id}`);
     });
   } catch (err) {
     console.error('Error joining project rooms:', err);
   }
 
+  // プロジェクトルームの動的参加・離脱
+  socket.on('join:project', (projectId: number) => {
+    socket.join(`project_${projectId}`);
+  });
+
+  socket.on('leave:project', (projectId: number) => {
+    socket.leave(`project_${projectId}`);
+  });
+
   socket.on('disconnect', () => {
-    console.log(`User disconnected: ID ${user.userId}`);
+    // クライアント切断時は全ルームから自動離脱される
   });
 });
 

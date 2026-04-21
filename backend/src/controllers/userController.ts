@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { Pool } from 'pg';
 import { AuthRequest } from '../middleware/authMiddleware';
 import bcrypt from 'bcrypt';
+import { NOTIFICATION_SELECT_QUERY } from '../utils/activityLogger';
 
 const pool = new Pool({
   user: process.env.DB_USER || 'admin',
@@ -70,21 +71,15 @@ export const userController = {
   // 通知リストの取得
   async getNotifications(req: AuthRequest, res: Response): Promise<void> {
     const userId = req.user?.userId;
+    const tenantId = req.user?.tenantId;
     try {
-      const result = await pool.query(`
-        SELECT
-          un.id, un.is_read, un.created_at,
-          al.action, al.details,
-          t.id as task_id, t.title as task_title, t.project_id,
-          u.name as actor_name
-        FROM user_notifications un
-        JOIN activity_logs al ON un.activity_log_id = al.id
-        JOIN tasks t ON al.task_id = t.id
-        LEFT JOIN users u ON al.user_id = u.id
-        WHERE un.user_id = $1
+      const result = await pool.query(
+        `${NOTIFICATION_SELECT_QUERY}
+        WHERE un.user_id = $1 AND un.tenant_id = $2
         ORDER BY un.created_at DESC
-        LIMIT 20
-      `, [userId]);
+        LIMIT 20`,
+        [userId, tenantId]
+      );
       res.json({ notifications: result.rows });
     } catch (err) {
       console.error(err);
@@ -95,15 +90,16 @@ export const userController = {
   // 特定のタスクに関する通知を既読にする
   async markTaskNotificationsAsRead(req: AuthRequest, res: Response): Promise<void> {
     const userId = req.user?.userId;
+    const tenantId = req.user?.tenantId;
     const taskId = req.params.taskId;
     try {
       await pool.query(`
         UPDATE user_notifications
         SET is_read = TRUE
-        WHERE user_id = $1 AND activity_log_id IN (
-          SELECT id FROM activity_logs WHERE task_id = $2
+        WHERE user_id = $1 AND tenant_id = $2 AND activity_log_id IN (
+          SELECT id FROM activity_logs WHERE task_id = $3
         )
-      `, [userId, taskId]);
+      `, [userId, tenantId, taskId]);
       res.json({ message: 'タスクの通知を既読にしました' });
     } catch (err) {
       console.error(err);
@@ -114,10 +110,11 @@ export const userController = {
   // 未読通知件数の取得
   async getUnreadCount(req: AuthRequest, res: Response): Promise<void> {
     const userId = req.user?.userId;
+    const tenantId = req.user?.tenantId;
     try {
       const result = await pool.query(
-        'SELECT COUNT(*) FROM user_notifications WHERE user_id = $1 AND is_read = FALSE',
-        [userId]
+        'SELECT COUNT(*) FROM user_notifications WHERE user_id = $1 AND tenant_id = $2 AND is_read = FALSE',
+        [userId, tenantId]
       );
       res.json({ count: parseInt(result.rows[0].count) });
     } catch (err) {
@@ -129,10 +126,11 @@ export const userController = {
   // 全ての通知を既読にする
   async markNotificationsAsRead(req: AuthRequest, res: Response): Promise<void> {
     const userId = req.user?.userId;
+    const tenantId = req.user?.tenantId;
     try {
       await pool.query(
-        'UPDATE user_notifications SET is_read = TRUE WHERE user_id = $1',
-        [userId]
+        'UPDATE user_notifications SET is_read = TRUE WHERE user_id = $1 AND tenant_id = $2',
+        [userId, tenantId]
       );
       res.json({ message: 'すべての通知を既読にしました' });
     } catch (err) {

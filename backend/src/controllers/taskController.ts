@@ -21,6 +21,23 @@ const pool = new Pool({
   port: parseInt(process.env.DB_PORT || '5432'),
 });
 
+// JOINを含めた完全なタスク情報を取得するヘルパー
+const fetchFullTask = async (taskId: number, tenantId: number) => {
+  const result = await pool.query(`
+    SELECT
+       t.id, t.tenant_id, t.title, t.status, t.description,
+       TO_CHAR(t.start_date, 'YYYY-MM-DD') AS start_date,
+       TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
+       t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
+       u.name AS assignee_name, p.name AS project_name
+    FROM tasks t
+    LEFT JOIN users u ON t.assignee_id = u.id
+    LEFT JOIN projects p ON t.project_id = p.id
+    WHERE t.id = $1 AND t.tenant_id = $2
+  `, [taskId, tenantId]);
+  return result.rows[0];
+};
+
 export const taskController = {
   // タスク一覧の取得（自分が参加しているプロジェクトのタスクのみ）
   async getAllTasks(req: AuthRequest, res: Response): Promise<void> {
@@ -81,6 +98,40 @@ export const taskController = {
     }
   },
 
+  // タスク単体の取得
+  async getTask(req: AuthRequest, res: Response): Promise<void> {
+    const tenantId = req.user?.tenantId;
+    const userId = req.user?.userId;
+    const taskId = req.params.id;
+
+    try {
+      // プロジェクトメンバーであることを確認しつつタスクを取得
+      const result = await pool.query(`
+        SELECT
+           t.id, t.tenant_id, t.title, t.status, t.description,
+           TO_CHAR(t.start_date, 'YYYY-MM-DD') AS start_date,
+           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
+           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
+           u.name AS assignee_name, p.name AS project_name
+        FROM tasks t
+        LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
+        INNER JOIN project_members pm ON t.project_id = pm.project_id
+        WHERE t.id = $1 AND t.tenant_id = $2 AND t.deleted_at IS NULL AND pm.user_id = $3
+      `, [taskId, tenantId, userId]);
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
+        return;
+      }
+
+      res.json({ task: result.rows[0] });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: 'タスクの取得に失敗しました' });
+    }
+  },
+
   // タスクの作成（Owner または Editor のみ可能）
   async createTask(req: AuthRequest, res: Response): Promise<void> {
     const tenantId = req.user?.tenantId;
@@ -127,19 +178,7 @@ export const taskController = {
       const tempTask = result.rows[0];
 
       // JOINを含めた完全なタスク情報を再取得
-      const fullTaskRes = await pool.query(`
-        SELECT
-           t.id, t.tenant_id, t.title, t.status, t.description, t.start_date,
-           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
-           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
-           u.name AS assignee_name, p.name AS project_name
-        FROM tasks t
-        LEFT JOIN users u ON t.assignee_id = u.id
-        LEFT JOIN projects p ON t.project_id = p.id
-        WHERE t.id = $1 AND t.tenant_id = $2
-      `, [tempTask.id, tenantId]);
-
-      const newTask = fullTaskRes.rows[0];
+      const newTask = await fetchFullTask(tempTask.id, tenantId!);
 
       // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
       io.to(`project_${newTask.project_id}`).emit('task:created', {
@@ -228,19 +267,7 @@ export const taskController = {
       const tempUpdatedTask = result.rows[0];
 
       // JOINを含めた完全なタスク情報を再取得
-      const fullTaskRes = await pool.query(`
-        SELECT
-           t.id, t.tenant_id, t.title, t.status, t.description, t.start_date,
-           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
-           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
-           u.name AS assignee_name, p.name AS project_name
-        FROM tasks t
-        LEFT JOIN users u ON t.assignee_id = u.id
-        LEFT JOIN projects p ON t.project_id = p.id
-        WHERE t.id = $1 AND t.tenant_id = $2
-      `, [tempUpdatedTask.id, tenantId]);
-
-      const updatedTask = fullTaskRes.rows[0];
+      const updatedTask = await fetchFullTask(tempUpdatedTask.id, tenantId!);
 
       // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
       io.to(`project_${updatedTask.project_id}`).emit('task:updated', {

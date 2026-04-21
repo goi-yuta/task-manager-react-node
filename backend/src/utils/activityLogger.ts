@@ -1,6 +1,19 @@
 import { Pool } from 'pg';
 import { io } from '../index';
 
+/** 通知詳細を取得するための共通クエリ（WHERE句の前まで） */
+export const NOTIFICATION_SELECT_QUERY = `
+  SELECT
+    un.id, un.user_id, un.is_read, un.created_at,
+    al.action, al.details,
+    t.id as task_id, t.title as task_title, t.project_id,
+    u.name as actor_name
+  FROM user_notifications un
+  JOIN activity_logs al ON un.activity_log_id = al.id
+  JOIN tasks t ON al.task_id = t.id
+  LEFT JOIN users u ON al.user_id = u.id
+`;
+
 /**
  * アクティビティログをDBに記録し、通知を生成する汎用関数
  */
@@ -23,43 +36,40 @@ export const logActivity = async (
     const logRes = await pool.query(query, [tenantId, projectId, taskId, userId, action, details]);
     const activityLogId = logRes.rows[0].id;
 
-    // 2. 通知の生成（自分以外のプロジェクトメンバー全員）
-    const membersRes = await pool.query(
-      'SELECT user_id FROM project_members WHERE project_id = $1 AND user_id != $2',
-      [projectId, userId || 0]
+    // 2. 通知の一括生成（自分以外のプロジェクトメンバー全員）
+    const insertedRes = await pool.query(
+      `INSERT INTO user_notifications (user_id, tenant_id, activity_log_id)
+       SELECT pm.user_id, $1, $2
+       FROM project_members pm
+       WHERE pm.project_id = $3 AND pm.user_id != $4
+       RETURNING id, user_id`,
+      [tenantId, activityLogId, projectId, userId || 0]
     );
 
-    for (const member of membersRes.rows) {
-      await pool.query(
-        `INSERT INTO user_notifications (user_id, tenant_id, activity_log_id)
-         VALUES ($1, $2, $3)`,
-        [member.user_id, tenantId, activityLogId]
-      );
+    if (insertedRes.rows.length === 0) return;
 
-      // 3. 詳細情報を取得してWebSocketで通知（個人ルーム user_{id} 宛）
-      const notificationDetailsRes = await pool.query(`
-        SELECT
-          un.id, un.is_read, un.created_at,
-          al.action, al.details,
-          t.id as task_id, t.title as task_title, t.project_id,
-          u.name as actor_name
-        FROM user_notifications un
-        JOIN activity_logs al ON un.activity_log_id = al.id
-        JOIN tasks t ON al.task_id = t.id
-        LEFT JOIN users u ON al.user_id = u.id
-        WHERE un.id = (SELECT id FROM user_notifications WHERE user_id = $1 AND activity_log_id = $2 ORDER BY id DESC LIMIT 1)
-      `, [member.user_id, activityLogId]);
+    // 3. 通知詳細を一括取得
+    const notificationIds = insertedRes.rows.map(r => r.id);
+    const notificationsRes = await pool.query(
+      `${NOTIFICATION_SELECT_QUERY} WHERE un.id = ANY($1::int[])`,
+      [notificationIds]
+    );
 
-      const notification = notificationDetailsRes.rows[0];
+    // 4. 未読件数を一括取得
+    const targetUserIds = insertedRes.rows.map(r => r.user_id);
+    const countsRes = await pool.query(
+      `SELECT user_id, COUNT(*) as count
+       FROM user_notifications
+       WHERE user_id = ANY($1::int[]) AND is_read = FALSE
+       GROUP BY user_id`,
+      [targetUserIds]
+    );
+    const unreadMap = new Map(countsRes.rows.map((r: any) => [r.user_id, parseInt(r.count)]));
 
-      // 未読件数を取得
-      const countRes = await pool.query(
-        'SELECT COUNT(*) FROM user_notifications WHERE user_id = $1 AND is_read = FALSE',
-        [member.user_id]
-      );
-      const unreadCount = parseInt(countRes.rows[0].count);
-
-      io.to(`user_${member.user_id}`).emit('notification:new', {
+    // 5. 各ユーザーにWebSocket通知
+    for (const notification of notificationsRes.rows) {
+      const unreadCount = unreadMap.get(notification.user_id) || 0;
+      io.to(`user_${notification.user_id}`).emit('notification:new', {
         unreadCount,
         notification
       });

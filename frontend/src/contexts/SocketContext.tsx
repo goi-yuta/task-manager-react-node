@@ -15,10 +15,7 @@ export const SocketProvider: React.FC<{ token: string | null; children: React.Re
 
   useEffect(() => {
     if (token) {
-      // サーバーのURLを取得（API_BASEから /api などを除いたベース部分）
-      const socketUrl = API_BASE.replace('/api', ''); // config.tsに依存
-
-      const newSocket = io(socketUrl, {
+      const newSocket = io(API_BASE, {
         auth: { token },
       });
 

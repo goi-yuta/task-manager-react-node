@@ -15,6 +15,17 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
 
   const { socket } = useSocket();
 
+  // プロジェクト切り替え時にルームを更新
+  useEffect(() => {
+    if (!socket || !currentProjectId) return;
+
+    socket.emit('join:project', currentProjectId);
+
+    return () => {
+      socket.emit('leave:project', currentProjectId);
+    };
+  }, [socket, currentProjectId]);
+
   // WebSocketイベントの購読
   useEffect(() => {
     if (!socket || !currentProjectId) return;

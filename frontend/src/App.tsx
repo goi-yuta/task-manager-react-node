@@ -246,13 +246,12 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
       setCurrentProjectId(notif.project_id);
     }
 
-    // 2. タスク詳細を取得してモーダルを開く
+    // 2. タスク単体を取得してモーダルを開く
     try {
-      const res = await apiFetch(`/tasks?projectId=${notif.project_id}`);
+      const res = await apiFetch(`/tasks/${notif.task_id}`);
       const data = await res.json();
-      const targetTask = data.tasks.find((t: Task) => t.id === notif.task_id);
-      if (targetTask) {
-        setEditingTask(targetTask);
+      if (data.task) {
+        setEditingTask(data.task);
         // 3. 既読にする
         markTaskAsRead(notif.task_id);
       }
@@ -266,7 +265,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     if (editingTask && notifications.some(n => n.task_id === editingTask.id && !n.is_read)) {
       markTaskAsRead(editingTask.id);
     }
-  }, [editingTask, markTaskAsRead]);
+  }, [editingTask, notifications, markTaskAsRead]);
 
   // 新規プロジェクト作成
   const createProject = async () => {

@@ -11,6 +11,7 @@ router.use(authenticateToken);
 
 // 各エンドポイント（処理自体は taskController に任せる）
 router.get('/', taskController.getAllTasks);
+router.get('/:id', taskController.getTask);
 router.post('/', taskController.createTask);
 router.put('/:id', taskController.updateTask);
 router.delete('/:id', taskController.deleteTask);
