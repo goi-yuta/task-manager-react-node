@@ -65,5 +65,79 @@ export const userController = {
       console.error(err);
       res.status(500).json({ error: 'メンバーの招待に失敗しました' });
     }
+  },
+
+  // 通知リストの取得
+  async getNotifications(req: AuthRequest, res: Response): Promise<void> {
+    const userId = req.user?.userId;
+    try {
+      const result = await pool.query(`
+        SELECT
+          un.id, un.is_read, un.created_at,
+          al.action, al.details,
+          t.id as task_id, t.title as task_title, t.project_id,
+          u.name as actor_name
+        FROM user_notifications un
+        JOIN activity_logs al ON un.activity_log_id = al.id
+        JOIN tasks t ON al.task_id = t.id
+        LEFT JOIN users u ON al.user_id = u.id
+        WHERE un.user_id = $1
+        ORDER BY un.created_at DESC
+        LIMIT 20
+      `, [userId]);
+      res.json({ notifications: result.rows });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: '通知の取得に失敗しました' });
+    }
+  },
+
+  // 特定のタスクに関する通知を既読にする
+  async markTaskNotificationsAsRead(req: AuthRequest, res: Response): Promise<void> {
+    const userId = req.user?.userId;
+    const taskId = req.params.taskId;
+    try {
+      await pool.query(`
+        UPDATE user_notifications
+        SET is_read = TRUE
+        WHERE user_id = $1 AND activity_log_id IN (
+          SELECT id FROM activity_logs WHERE task_id = $2
+        )
+      `, [userId, taskId]);
+      res.json({ message: 'タスクの通知を既読にしました' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: '通知の更新に失敗しました' });
+    }
+  },
+
+  // 未読通知件数の取得
+  async getUnreadCount(req: AuthRequest, res: Response): Promise<void> {
+    const userId = req.user?.userId;
+    try {
+      const result = await pool.query(
+        'SELECT COUNT(*) FROM user_notifications WHERE user_id = $1 AND is_read = FALSE',
+        [userId]
+      );
+      res.json({ count: parseInt(result.rows[0].count) });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: '通知件数の取得に失敗しました' });
+    }
+  },
+
+  // 全ての通知を既読にする
+  async markNotificationsAsRead(req: AuthRequest, res: Response): Promise<void> {
+    const userId = req.user?.userId;
+    try {
+      await pool.query(
+        'UPDATE user_notifications SET is_read = TRUE WHERE user_id = $1',
+        [userId]
+      );
+      res.json({ message: 'すべての通知を既読にしました' });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: '通知の更新に失敗しました' });
+    }
   }
 };

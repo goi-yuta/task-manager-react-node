@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { logActivity } from '../utils/activityLogger';
+import { io } from '../index';
 
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
@@ -123,7 +124,28 @@ export const taskController = {
         [tenantId, title, 'TODO', project_id, assignee_id || null, start_date || null, due_date || null, description || null, userId]
       );
 
-      const newTask = result.rows[0];
+      const tempTask = result.rows[0];
+
+      // JOINを含めた完全なタスク情報を再取得
+      const fullTaskRes = await pool.query(`
+        SELECT
+           t.id, t.tenant_id, t.title, t.status, t.description, t.start_date,
+           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
+           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
+           u.name AS assignee_name, p.name AS project_name
+        FROM tasks t
+        LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
+        WHERE t.id = $1 AND t.tenant_id = $2
+      `, [tempTask.id, tenantId]);
+
+      const newTask = fullTaskRes.rows[0];
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      io.to(`project_${newTask.project_id}`).emit('task:created', {
+        task: newTask,
+        senderId: userId
+      });
 
       if (tenantId && userId) {
         await logActivity(
@@ -203,7 +225,28 @@ export const taskController = {
         return;
       }
 
-      const updatedTask = result.rows[0];
+      const tempUpdatedTask = result.rows[0];
+
+      // JOINを含めた完全なタスク情報を再取得
+      const fullTaskRes = await pool.query(`
+        SELECT
+           t.id, t.tenant_id, t.title, t.status, t.description, t.start_date,
+           TO_CHAR(t.due_date, 'YYYY-MM-DD') AS due_date,
+           t.project_id, t.assignee_id, t.created_by, t.created_at, t.deleted_at,
+           u.name AS assignee_name, p.name AS project_name
+        FROM tasks t
+        LEFT JOIN users u ON t.assignee_id = u.id
+        LEFT JOIN projects p ON t.project_id = p.id
+        WHERE t.id = $1 AND t.tenant_id = $2
+      `, [tempUpdatedTask.id, tenantId]);
+
+      const updatedTask = fullTaskRes.rows[0];
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      io.to(`project_${updatedTask.project_id}`).emit('task:updated', {
+        task: updatedTask,
+        senderId: userId
+      });
 
       if (oldTask && tenantId && userId) {
         const changes: Record<string, { old: any; new: any }> = {};
@@ -280,7 +323,7 @@ export const taskController = {
            AND pm.user_id = $3
            AND pm.role IN ('Owner', 'Editor')
            AND tasks.deleted_at IS NULL
-         RETURNING tasks.id`,
+         RETURNING tasks.id, tasks.project_id`,
         [taskId, tenantId, userId]
       );
 
@@ -288,6 +331,16 @@ export const taskController = {
         res.status(404).json({ error: 'タスクが見つからないか、権限がありません' });
         return;
       }
+
+      const deletedTaskInfo = result.rows[0];
+      const projectId = deletedTaskInfo.project_id;
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      io.to(`project_${projectId}`).emit('task:deleted', {
+        taskId: Number(taskId),
+        senderId: userId
+      });
+
       res.json({ message: 'タスクを削除しました', id: taskId });
     } catch (err) {
       console.error(err);
@@ -362,6 +415,28 @@ export const taskController = {
          VALUES ($1, $2, $3) RETURNING *`,
         [taskId, userId, content]
       );
+
+      const newCommentId = result.rows[0].id;
+
+      // 投稿者名を含めた完全なコメント情報を取得
+      const fullCommentRes = await pool.query(
+        `SELECT tc.id, tc.task_id, tc.content, tc.created_at, u.name as user_name
+         FROM task_comments tc
+         LEFT JOIN users u ON tc.user_id = u.id
+         WHERE tc.id = $1`,
+        [newCommentId]
+      );
+      const newComment = fullCommentRes.rows[0];
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      const taskResForRoom = await pool.query('SELECT project_id FROM tasks WHERE id = $1', [newComment.task_id]);
+      const commentProjectId = taskResForRoom.rows[0]?.project_id;
+      if (commentProjectId) {
+        io.to(`project_${commentProjectId}`).emit('comment:added', {
+          comment: newComment,
+          senderId: userId
+        });
+      }
 
       const taskRow = await pool.query(`SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2`, [taskId, tenantId]);
       if (tenantId && userId && taskRow.rows[0]) {
@@ -447,6 +522,18 @@ export const taskController = {
         [taskId, userId, originalName, filePath, fileMimeType, fileSize]
       );
 
+      const newAttachment = result.rows[0];
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      const attachmentTaskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1', [newAttachment.task_id]);
+      const attachmentProjectId = attachmentTaskRes.rows[0]?.project_id;
+      if (attachmentProjectId) {
+        io.to(`project_${attachmentProjectId}`).emit('attachment:uploaded', {
+          attachment: newAttachment,
+          senderId: userId
+        });
+      }
+
       const taskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2', [taskId, tenantId]);
       const projectId = taskRes.rows[0]?.project_id;
 
@@ -508,6 +595,17 @@ export const taskController = {
 
       // DBから削除
       await pool.query('DELETE FROM task_attachments WHERE id = $1', [attachmentId]);
+
+      // WebSocket通知: 同じプロジェクトのメンバーにのみ通知
+      const deleteAttachmentTaskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1', [taskId]);
+      const deleteAttachmentProjectId = deleteAttachmentTaskRes.rows[0]?.project_id;
+      if (deleteAttachmentProjectId) {
+        io.to(`project_${deleteAttachmentProjectId}`).emit('attachment:deleted', {
+          taskId: Number(taskId),
+          attachmentId: Number(attachmentId),
+          senderId: userId
+        });
+      }
 
       const taskRes = await pool.query('SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2', [taskId, tenantId]);
       if (tenantId && userId && taskRes.rows[0]) {

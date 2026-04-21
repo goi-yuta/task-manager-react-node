@@ -19,6 +19,7 @@ async function setupDatabase() {
     console.log('🔄 Database setup started...');
 
     // 依存関係を考慮して削除 (子テーブルから先に削除)
+    await client.query('DROP TABLE IF EXISTS user_notifications;');
     await client.query('DROP TABLE IF EXISTS activity_logs;');
     await client.query('DROP TABLE IF EXISTS project_members;');
     await client.query('DROP TABLE IF EXISTS task_attachments;');
@@ -176,8 +177,9 @@ async function setupDatabase() {
 
     console.log('✅ Test data inserted successfully!');
 
-    const createActivityLogsTable = `
-      CREATE TABLE IF NOT EXISTS activity_logs (
+    // 7. activity_logs テーブル作成
+    await client.query(`
+      CREATE TABLE activity_logs (
         id SERIAL PRIMARY KEY,
         tenant_id INTEGER NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
         project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -187,14 +189,27 @@ async function setupDatabase() {
         details JSONB,
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
-    `;
-
-    // 既存の query(createTasksTable) などの後に実行する
-    await pool.query(createActivityLogsTable);
-    await pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_activity_logs_task_id ON activity_logs(task_id, tenant_id);
     `);
-    console.log("✅ activity_logs table created successfully!");
+    await client.query(`
+      CREATE INDEX idx_activity_logs_task_id ON activity_logs(task_id, tenant_id);
+    `);
+    console.log("✅ Table \"activity_logs\" created successfully!");
+
+    // 8. user_notifications テーブル作成
+    await client.query(`
+      CREATE TABLE user_notifications (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+          tenant_id INTEGER REFERENCES tenants(id) ON DELETE CASCADE,
+          activity_log_id INTEGER REFERENCES activity_logs(id) ON DELETE CASCADE,
+          is_read BOOLEAN DEFAULT FALSE,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    await client.query(`
+      CREATE INDEX idx_user_notifications_user_id_is_read ON user_notifications(user_id, is_read);
+    `);
+    console.log("✅ Table \"user_notifications\" created successfully!");
 
   } catch (err) {
     console.error('❌ Error during setup:', err);

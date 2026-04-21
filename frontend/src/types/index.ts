@@ -48,3 +48,15 @@ export type ProjectMember = {
   role: 'Owner' | 'Editor' | 'Viewer';
   joined_at: string;
 };
+
+export interface NotificationItem {
+  id: number;
+  is_read: boolean;
+  created_at: string;
+  action: string;
+  details: any;
+  task_id: number;
+  task_title: string;
+  project_id: number;
+  actor_name: string;
+}

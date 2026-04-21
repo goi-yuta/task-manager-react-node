@@ -13,6 +13,7 @@ import {
   Paperclip, Trash2, File, Plus
 } from 'lucide-react';
 import { API_BASE } from '../config';
+import { useSocket } from '../contexts/SocketContext';
 
 interface TaskComment {
   id: number;
@@ -221,7 +222,49 @@ export const TaskEditModal: React.FC<TaskEditModalProps> = ({ isOpen, onClose, t
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [refreshLogTrigger, setRefreshLogTrigger] = useState(0);
 
+  const { socket } = useSocket();
+
   const isViewer = currentUserRole === 'Viewer';
+
+  // WebSocketイベントの購読
+  useEffect(() => {
+    if (!socket || !isOpen || !task?.id) return;
+
+    const handleCommentAdded = (data: { comment: TaskComment; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+      // comment オブジェクトには task_id が含まれているはず
+      if ((data.comment as any).task_id === task.id) {
+        setComments(prev => [...prev, data.comment]);
+        setRefreshLogTrigger(prev => prev + 1);
+      }
+    };
+
+    const handleAttachmentUploaded = (data: { attachment: TaskAttachment; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+      if ((data.attachment as any).task_id === task.id) {
+        setAttachments(prev => [...prev, data.attachment]);
+        setRefreshLogTrigger(prev => prev + 1);
+      }
+    };
+
+    const handleAttachmentDeleted = (data: { taskId: number; attachmentId: number; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+      if (data.taskId === task.id) {
+        setAttachments(prev => prev.filter(att => att.id !== data.attachmentId));
+        setRefreshLogTrigger(prev => prev + 1);
+      }
+    };
+
+    socket.on('comment:added', handleCommentAdded);
+    socket.on('attachment:uploaded', handleAttachmentUploaded);
+    socket.on('attachment:deleted', handleAttachmentDeleted);
+
+    return () => {
+      socket.off('comment:added', handleCommentAdded);
+      socket.off('attachment:uploaded', handleAttachmentUploaded);
+      socket.off('attachment:deleted', handleAttachmentDeleted);
+    };
+  }, [socket, isOpen, task?.id, currentUserId]);
 
   const usersRef = useRef(users);
   useEffect(() => {

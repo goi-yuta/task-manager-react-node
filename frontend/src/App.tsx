@@ -6,10 +6,14 @@ import { TaskForm } from './components/TaskForm';
 import { TaskItem } from './components/TaskItem';
 import { TaskFilterBar } from './components/TaskFilterBar';
 import { GanttChart } from './components/GanttChart';
+import { Header } from './components/Header';
 import { useTaskManager } from './hooks/useTaskManager';
-import { type UserData, type ProjectData, type SortOrder, type ProjectMember, type Task } from './types';
-import { CheckCircle2, RefreshCw, AlertCircle, Plus, LogOut, Folder, Mail, Lock, UserPlus, LayoutList, KanbanSquare } from 'lucide-react';
+import { useNotifications } from './hooks/useNotifications';
+import { type UserData, type ProjectData, type SortOrder, type ProjectMember, type Task, type NotificationItem } from './types';
+import { CheckCircle2, RefreshCw, AlertCircle, LayoutList, KanbanSquare, Mail, Lock, Folder, Plus } from 'lucide-react';
 import { API_BASE } from './config';
+import { SocketProvider } from './contexts/SocketContext';
+
 
 // ==========================================
 // 1. 認証カスタムフック (Auth Logic)
@@ -154,9 +158,16 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
   const [isInviteUserModalOpen, setIsInviteUserModalOpen] = useState(false);
 
   const [projectMembers, setProjectMembers] = useState<ProjectMember[]>([]);
-
   const [viewMode, setViewMode] = useState<'list' | 'gantt'>('list');
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+
+  // 通知関連のロジックをカスタムフックに委譲
+  const {
+    notifications,
+    unreadNotifications,
+    markAllAsRead,
+    markTaskAsRead
+  } = useNotifications(apiFetch);
 
   // 初期データ（プロジェクトとユーザー）取得用のローディングとエラー
   const [initialLoading, setInitialLoading] = useState(true);
@@ -178,7 +189,7 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     filterKeyword, setFilterKeyword,
     executeSearch,
     clearFilters
-  } = useTaskManager(currentProjectId, apiFetch);
+  } = useTaskManager(currentProjectId, apiFetch, user.id);
 
   // 初期データの取得（プロジェクト一覧とユーザー一覧）
   useEffect(() => {
@@ -228,6 +239,35 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     }
   }, [fetchProjectMembers, isInviteModalOpen]);
 
+  // 通知クリック時の処理
+  const handleNotificationClick = async (notif: NotificationItem) => {
+    // 1. プロジェクトが異なる場合は切り替え
+    if (notif.project_id !== currentProjectId) {
+      setCurrentProjectId(notif.project_id);
+    }
+
+    // 2. タスク詳細を取得してモーダルを開く
+    try {
+      const res = await apiFetch(`/tasks?projectId=${notif.project_id}`);
+      const data = await res.json();
+      const targetTask = data.tasks.find((t: Task) => t.id === notif.task_id);
+      if (targetTask) {
+        setEditingTask(targetTask);
+        // 3. 既読にする
+        markTaskAsRead(notif.task_id);
+      }
+    } catch (err) {
+      console.error('タスクの取得に失敗しました', err);
+    }
+  };
+
+  // タスクを開いた時に、そのタスクに関連する通知を既読にする
+  useEffect(() => {
+    if (editingTask && notifications.some(n => n.task_id === editingTask.id && !n.is_read)) {
+      markTaskAsRead(editingTask.id);
+    }
+  }, [editingTask, markTaskAsRead]);
+
   // 新規プロジェクト作成
   const createProject = async () => {
     const name = prompt('新しいプロジェクト名を入力してください');
@@ -255,70 +295,21 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold"><CheckCircle2 className="w-5 h-5"/></div>
-              <span className="font-extrabold text-xl tracking-tight hidden sm:block">TaskManager</span>
-            </div>
-
-            <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200">
-              <Folder className="w-4 h-4 text-slate-400" />
-              <select
-                value={currentProjectId || ''}
-                onChange={(e) => setCurrentProjectId(Number(e.target.value))}
-                className="bg-transparent text-sm font-bold text-slate-700 outline-none cursor-pointer"
-              >
-                {projects.length === 0 && <option value="">プロジェクトなし</option>}
-                {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-              {isTenantOwner && (
-                <button onClick={createProject} className="ml-2 p-1 hover:bg-slate-200 rounded text-slate-500 transition-colors" title="プロジェクト追加">
-                  <Plus className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            {/* メンバー招待ボタン */}
-            {currentProjectId && (
-              <button
-                onClick={() => setIsInviteModalOpen(true)}
-                className="hidden sm:flex items-center text-sm bg-indigo-50 text-indigo-600 px-3 py-1.5 rounded-lg hover:bg-indigo-100 transition-colors font-bold"
-              >
-                <UserPlus className="w-4 h-4 mr-1.5" />
-                メンバー管理
-              </button>
-            )}
-
-            {isTenantOwner && (
-              <button
-                onClick={() => setIsInviteUserModalOpen(true)}
-                className="hidden sm:flex items-center text-sm bg-slate-100 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-200 transition-colors font-bold"
-              >
-                <UserPlus className="w-4 h-4 mr-1.5" />
-                組織に招待
-              </button>
-            )}
-
-            <div className="hidden sm:flex items-center gap-2 text-sm">
-              <div className="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-full flex items-center justify-center font-bold">
-                {user.name.charAt(0)}
-              </div>
-              <div>
-                <p className="font-bold text-slate-700 leading-tight">{user.name}</p>
-                <p className="text-xs text-slate-400">テナントID: {user.tenant_id}</p>
-              </div>
-            </div>
-            <button onClick={logout} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors flex items-center gap-2" title="ログアウト">
-              <LogOut className="w-5 h-5" />
-              <span className="text-sm font-bold hidden sm:block">ログアウト</span>
-            </button>
-          </div>
-        </div>
-      </header>
+      <Header
+        user={user}
+        projects={projects}
+        currentProjectId={currentProjectId}
+        setCurrentProjectId={setCurrentProjectId}
+        unreadNotifications={unreadNotifications}
+        notifications={notifications}
+        onMarkAllAsRead={markAllAsRead}
+        onNotificationClick={handleNotificationClick}
+        onCreateProject={createProject}
+        onInviteMember={() => setIsInviteModalOpen(true)}
+        onInviteUser={() => setIsInviteUserModalOpen(true)}
+        onLogout={logout}
+        isTenantOwner={isTenantOwner}
+      />
 
       <main className="max-w-4xl mx-auto p-4 md:p-8">
         {(globalError || tasksError) && (
@@ -482,5 +473,9 @@ export default function App() {
   }
 
   // ログイン後はメイン画面を表示
-  return <MainApp user={user} logout={logout} apiFetch={apiFetch} token={token} />;
+  return (
+    <SocketProvider token={token}>
+      <MainApp user={user} logout={logout} apiFetch={apiFetch} token={token} />
+    </SocketProvider>
+  );
 }

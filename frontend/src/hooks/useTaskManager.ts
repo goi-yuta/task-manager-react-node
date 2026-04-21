@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TASK_STATUS, type Task, type SortOrder, type TaskStatus } from '../types';
+import { useSocket } from '../contexts/SocketContext';
 
-export const useTaskManager = (currentProjectId: number | null, apiFetch: any) => {
+export const useTaskManager = (currentProjectId: number | null, apiFetch: any, currentUserId?: number) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -11,6 +12,45 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any) =
   const [filterAssignee, setFilterAssignee] = useState<string>('');
   const [filterKeyword, setFilterKeyword] = useState<string>('');
   const [activeKeyword, setActiveKeyword] = useState<string>('');
+
+  const { socket } = useSocket();
+
+  // WebSocketイベントの購読
+  useEffect(() => {
+    if (!socket || !currentProjectId) return;
+
+    const handleTaskCreated = (data: { task: Task; senderId: number }) => {
+      // 自分の操作なら無視（既にオプティミスティックUIで反映済み、またはfetchTasksで更新済み）
+      if (data.senderId === currentUserId) return;
+
+      // 現在表示中のプロジェクトのタスクであれば追加
+      if (data.task.project_id === currentProjectId) {
+        setTasks(prev => [...prev, data.task]);
+      }
+    };
+
+    const handleTaskUpdated = (data: { task: Task; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+
+      setTasks(prev => prev.map(t => t.id === data.task.id ? data.task : t));
+    };
+
+    const handleTaskDeleted = (data: { taskId: number; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+
+      setTasks(prev => prev.filter(t => t.id !== data.taskId));
+    };
+
+    socket.on('task:created', handleTaskCreated);
+    socket.on('task:updated', handleTaskUpdated);
+    socket.on('task:deleted', handleTaskDeleted);
+
+    return () => {
+      socket.off('task:created', handleTaskCreated);
+      socket.off('task:updated', handleTaskUpdated);
+      socket.off('task:deleted', handleTaskDeleted);
+    };
+  }, [socket, currentProjectId, currentUserId]);
 
   // タスクの取得
   const fetchTasks = useCallback(async () => {
