@@ -25,6 +25,8 @@
   [Content-Typeの罠とundefinedの恐怖。ファイル添付APIを自作して思い知った「フルスタックの壁」](https://zenn.dev/goiyu/articles/5022efe4378804)
 * **第9回（アクティビティログ編）**：  
   [「変わってないのに変わった」の罠とJSONBの設計。20年目のフロントエンジニアがSaaSのアクティビティログを自作して思い知った監査設計](https://zenn.dev/goiyu/articles/f76c3757f7018c)
+* **第10回（リアルタイム同期（WebSocket）とアプリ内通知編）**：  
+  [「誰かが変えた」を即座に反映する。20年目のフロントエンジニアがSocket.IOでリアルタイム同期と通知機能を自作して得た設計の学び](https://zenn.dev/goiyu/articles/3f7124cdfea772)
 
 ## 🛠️ 技術スタック
 
@@ -37,6 +39,7 @@
 * [Lucide React](https://lucide.dev/) (Icons)
 * [Tiptap](https://tiptap.dev/) (Rich Text Editor)
 * [DOMPurify](https://github.com/cure53/DOMPurify) (XSS Sanitization)
+* [Socket.IO Client](https://socket.io/)（リアルタイム通信）
 
 **Backend**
 
@@ -46,6 +49,7 @@
 * [pg (node-postgres)](https://node-postgres.com/)
 * [bcrypt](https://github.com/kelektiv/node.bcrypt.js) (パスワードハッシュ化)
 * [jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) (JWT認証)
+* [Socket.IO](https://socket.io/)（WebSocketサーバー）
 
 ## 📁 ディレクトリ構成
 
@@ -141,8 +145,8 @@ npm run dev
 - [x] 高度なフィルタリング
 - [x] 画像やファイルの添付機能
 - [x] アクティビティログ
-- [ ] **WebSocketを利用したリアルタイム同期（次のターゲット）**
-- [ ] メール通知 ＆ 定期バッチ処理
+- [x] WebSocketを利用したリアルタイム同期・アプリ内通知
+- [ ] **メール通知 ＆ 定期バッチ処理（次のターゲット）**
 - [ ] CSVでの一括インポート / エクスポート
 - [ ] PostgreSQLのフルテキスト検索機能
 
