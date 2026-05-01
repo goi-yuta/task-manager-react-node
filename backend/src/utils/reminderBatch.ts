@@ -45,6 +45,8 @@ export const sendDailyReminders = async () => {
           `<li><strong>${t.title}</strong> (期限: ${t.due_date.replace(/-/g, '/')})</li>`
         ).join('');
 
+        // At-least-once戦略: メール送信成功後にフラグを更新
+        // 更新が失敗すると二重送信の可能性があるが、未送信よりは許容できる
         await sendMail({
           to: email,
           subject: `【重要】本日期限のタスクが ${tasks.length} 件あります`,

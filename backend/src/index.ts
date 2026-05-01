@@ -90,6 +90,8 @@ io.on('connection', async (socket) => {
 cron.schedule('0 9 * * *', () => {
   console.log('⏰ 期限リマインドバッチを開始します...');
   sendDailyReminders();
+}, {
+  timezone: "Asia/Tokyo"
 });
 
 // ルートエンドポイント
@@ -114,21 +116,23 @@ app.get('/health', async (req, res) => {
   }
 });
 
-app.get('/test-email', async (req, res) => {
-  try {
-    await sendMail({
-      to: 'test@example.com',
-      subject: 'テストメール送信（Task Manager）',
-      text: 'これはメール送信機能のテストです。Mailtrapに届いていれば成功です！',
-      html: '<strong>これはメール送信機能のテストです。</strong><p>Mailtrapに届いていれば成功です！</p>',
-    });
-    res.json({ status: 'OK', message: 'Test email sent successfully' });
-  } catch (error) {
-    // ログを出力しつつ、フロントエンドには簡潔なエラーを返す
-    console.error('Test email error:', error);
-    res.status(500).json({ status: 'Error', message: 'Failed to send test email' });
-  }
-});
+if (process.env.NODE_ENV !== 'production') {
+  app.get('/test-email', async (req, res) => {
+    try {
+      await sendMail({
+        to: 'test@example.com',
+        subject: 'テストメール送信（Task Manager）',
+        text: 'これはメール送信機能のテストです。Mailtrapに届いていれば成功です！',
+        html: '<strong>これはメール送信機能のテストです。</strong><p>Mailtrapに届いていれば成功です！</p>',
+      });
+      res.json({ status: 'OK', message: 'Test email sent successfully' });
+    } catch (error) {
+      // ログを出力しつつ、フロントエンドには簡潔なエラーを返す
+      console.error('Test email error:', error);
+      res.status(500).json({ status: 'Error', message: 'Failed to send test email' });
+    }
+  });
+}
 
 // ルーティングの設定
 app.use('/auth', authRoutes);
