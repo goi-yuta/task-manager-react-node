@@ -27,6 +27,9 @@
   [「変わってないのに変わった」の罠とJSONBの設計。20年目のフロントエンジニアがSaaSのアクティビティログを自作して思い知った監査設計](https://zenn.dev/goiyu/articles/f76c3757f7018c)
 * **第10回（リアルタイム同期（WebSocket）とアプリ内通知編）**：  
   [「誰かが変えた」を即座に反映する。20年目のフロントエンジニアがSocket.IOでリアルタイム同期と通知機能を自作して得た設計の学び](https://zenn.dev/goiyu/articles/3f7124cdfea772)
+* **第11回（メール通知 ＆ 定期バッチ処理編）**：  
+  [Fire-and-ForgetとAt-least-once。20年目のフロントエンジニアがメール通知で学んだ設計パターン](https://zenn.dev/goiyu/articles/0e1e4c8076c5ec)
+
 
 ## 🛠️ 技術スタック
 
@@ -50,6 +53,8 @@
 * [bcrypt](https://github.com/kelektiv/node.bcrypt.js) (パスワードハッシュ化)
 * [jsonwebtoken](https://github.com/auth0/node-jsonwebtoken) (JWT認証)
 * [Socket.IO](https://socket.io/)（WebSocketサーバー）
+* [Nodemailer](https://nodemailer.com/)（メール送信）
+* [node-cron](https://github.com/node-cron/node-cron)（定期バッチ処理）
 
 ## 📁 ディレクトリ構成
 
@@ -146,8 +151,8 @@ npm run dev
 - [x] 画像やファイルの添付機能
 - [x] アクティビティログ
 - [x] WebSocketを利用したリアルタイム同期・アプリ内通知
-- [ ] **メール通知 ＆ 定期バッチ処理（次のターゲット）**
-- [ ] CSVでの一括インポート / エクスポート
+- [x] メール通知 ＆ 定期バッチ処理
+- [ ] **CSVでの一括インポート / エクスポート（次のターゲット）**
 - [ ] PostgreSQLのフルテキスト検索機能
 
 ## 🤝 著者
