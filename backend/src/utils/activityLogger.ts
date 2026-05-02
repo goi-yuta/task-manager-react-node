@@ -1,7 +1,16 @@
 import { Pool } from 'pg';
 import { io } from '../index';
+import { sendMail } from './mailer';
 
-/** 通知詳細を取得するための共通クエリ（WHERE句の前まで） */
+interface ActivityDetails {
+  changes?: Record<string, { old: any; new: any }>;
+  assignee_name?: { old: string | null; new: string | null };
+  mentionedUserIds?: number[];
+  task_title?: string;
+  preview?: string;
+  [key: string]: any;
+}
+
 export const NOTIFICATION_SELECT_QUERY = `
   SELECT
     un.id, un.user_id, un.is_read, un.created_at,
@@ -14,9 +23,6 @@ export const NOTIFICATION_SELECT_QUERY = `
   LEFT JOIN users u ON al.user_id = u.id
 `;
 
-/**
- * アクティビティログをDBに記録し、通知を生成する汎用関数
- */
 export const logActivity = async (
   pool: Pool,
   tenantId: number,
@@ -24,7 +30,7 @@ export const logActivity = async (
   taskId: number | null,
   userId: number | null,
   action: string,
-  details: object = {}
+  details: ActivityDetails = {}
 ) => {
   try {
     // 1. アクティビティログの記録
@@ -55,8 +61,46 @@ export const logActivity = async (
       [notificationIds]
     );
 
-    // 4. 未読件数を一括取得
+    // 4. 通知対象者のメールアドレスと名前をDBから取得
     const targetUserIds = insertedRes.rows.map(r => r.user_id);
+    if (targetUserIds.length > 0) {
+      const usersRes = await pool.query(
+        `SELECT id, email, name FROM users WHERE id = ANY($1::int[])`,
+        [targetUserIds]
+      );
+      const userMap = new Map(usersRes.rows.map(u => [u.id, u]));
+
+      // アクションに応じたメール送信判定
+      for (const row of insertedRes.rows) {
+        const targetUser = userMap.get(row.user_id);
+        if (!targetUser) continue;
+
+        // 担当者に指名された場合 (TASK_UPDATED かつ assignee_id の変更)
+        if (action === 'TASK_UPDATED' && details.changes?.assignee_id) {
+          const newAssigneeId = details.changes.assignee_id.new;
+          if (targetUser.id === newAssigneeId) {
+            sendMail({
+              to: targetUser.email,
+              subject: `【アサイン】タスクの担当者に指名されました`,
+              text: `${targetUser.name}様\n\nお疲れ様です。以下のタスクの担当者に指名されました。\n\nタスク名: ${details.task_title || '不明'}\n\n確認をお願いします。`,
+              html: `<p>${targetUser.name}様</p><p>お疲れ様です。以下のタスクの<strong>担当者に指名されました。</strong></p><p><strong>タスク名:</strong>${details.task_title || '不明'}</p>`
+            }).catch(err => console.error('❌ Failed to send assignment email:', err));
+          }
+        }
+
+        // メンションされた場合 (後述の addComment 側で mentionedUserIds を渡す想定)
+        if (action === 'COMMENT_ADDED' && details.mentionedUserIds?.includes(targetUser.id)) {
+          sendMail({
+            to: targetUser.email,
+            subject: `【メンション】コメントであなた宛のメッセージがあります`,
+            text: `${targetUser.name}様\n\nお疲れ様です。コメントでメンションされました。\n\n内容: ${details.preview}...`,
+            html: `<p>${targetUser.name}様</p><p>コメントで<strong>メンションされました。</strong></p><p><strong>タスク名:</strong>${details.task_title || '不明'}</p><blockquote>${details.preview}...</blockquote>`
+          }).catch(err => console.error('❌ Failed to send mention email:', err));
+        }
+      }
+    }
+
+    // 5. 未読件数を一括取得
     const countsRes = await pool.query(
       `SELECT user_id, COUNT(*) as count
        FROM user_notifications
@@ -66,7 +110,7 @@ export const logActivity = async (
     );
     const unreadMap = new Map(countsRes.rows.map((r: any) => [r.user_id, parseInt(r.count)]));
 
-    // 5. 各ユーザーにWebSocket通知
+    // 6. 各ユーザーにWebSocket通知
     for (const notification of notificationsRes.rows) {
       const unreadCount = unreadMap.get(notification.user_id) || 0;
       io.to(`user_${notification.user_id}`).emit('notification:new', {

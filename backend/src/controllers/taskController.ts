@@ -318,7 +318,11 @@ export const taskController = {
             Number(taskId),
             userId,
             'TASK_UPDATED',
-            { changes, ...(assigneeName && { assignee_name: assigneeName }) }
+            {
+              changes,
+              task_title: updatedTask.title,
+              ...(assigneeName && { assignee_name: assigneeName })
+            }
           );
         }
       }
@@ -465,12 +469,26 @@ export const taskController = {
         });
       }
 
-      const taskRow = await pool.query(`SELECT project_id FROM tasks WHERE id = $1 AND tenant_id = $2`, [taskId, tenantId]);
+      const taskRow = await pool.query(`SELECT project_id, title FROM tasks WHERE id = $1 AND tenant_id = $2`, [taskId, tenantId]);
       if (tenantId && userId && taskRow.rows[0]) {
         // HTMLタグを除去してコメント冒頭50文字をプレビューとして保存
         const plainText = content.replace(/<[^>]*>/g, '').trim();
         const preview = plainText.slice(0, 50);
-        await logActivity(pool, tenantId, taskRow.rows[0].project_id, Number(taskId), userId, 'COMMENT_ADDED', { preview });
+        const mentionMatches = [...content.matchAll(/data-id="(\d+)"/g)];
+        const mentionedUserIds = mentionMatches.map(match => parseInt(match[1]));
+
+        await logActivity(
+          pool,
+          tenantId,
+          taskRow.rows[0].project_id,
+          Number(taskId),
+          userId,
+          'COMMENT_ADDED', {
+            preview,
+            mentionedUserIds,
+            task_title: taskRow.rows[0].title
+          }
+        );
       }
 
       res.status(201).json({ message: 'コメントを追加しました', comment: result.rows[0] });
