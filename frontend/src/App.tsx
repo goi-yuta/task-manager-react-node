@@ -303,8 +303,8 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
       await exportToCSV(currentProject.id);
       // ダウンロードはブラウザが自動で処理してくれます
     } catch (error) {
-      console.error(error);
-      alert('CSVの出力に失敗しました(App.tsx)');
+      console.error('Export Error:', error);
+      alert(`エラー: ${error instanceof Error ? error.message : 'CSVの出力に失敗しました'}`);
     } finally {
       setIsExporting(false);
     }
@@ -327,8 +327,9 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
       setIsImporting(true);
       await importCSV(currentProject.id, file);
       alert('CSVのインポートに成功しました！');
-    } catch (error: any) {
-      alert(`エラー: ${error.message}`);
+    } catch (error) {
+      console.error('Import Error:', error);
+      alert(`エラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
     } finally {
       setIsImporting(false);
       // 同じファイルを連続で選べるように、inputの値をリセットしておく
@@ -445,13 +446,15 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                   onChange={handleFileChange}
                 />
 
-                <button
-                  onClick={handleImportButtonClick}
-                  disabled={isImporting}
-                  className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {isImporting ? 'インポート中...' : 'CSVインポート'}
-                </button>
+                {currentProject?.role !== 'Viewer' && (
+                  <button
+                    onClick={handleImportButtonClick}
+                    disabled={isImporting}
+                    className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  >
+                    {isImporting ? 'インポート中...' : 'CSVインポート'}
+                  </button>
+                )}
 
                 <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)} className="text-sm border-2 border-slate-200 rounded-xl px-3 py-1.5 bg-white font-medium cursor-pointer">
                   <option value="default">標準</option>

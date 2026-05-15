@@ -17,6 +17,22 @@ interface CsvRecord {
   期限: string;
 }
 
+const ALLOWED_STATUS = new Set(['TODO', 'DOING', 'DONE']);
+const MAX_IMPORT_ROWS = 10000;
+
+const escapeForExcel = (v: unknown): string => {
+  const s = v == null ? '' : String(v);
+  if (/^'[=+\-@\t\r]/.test(s)) return `'${s}`;  // '=abc → ''=abc（二重化で往復保護）
+  if (/^[=+\-@\t\r]/.test(s)) return `'${s}`;   // =abc  → '=abc（injection防止）
+  return s;
+};
+
+const unescapeFromExcel = (s: string): string => {
+  if (/^''[=+\-@\t\r]/.test(s)) return s.slice(1);  // ''=abc → '=abc
+  if (/^'[=+\-@\t\r]/.test(s)) return s.slice(1);   // '=abc  → =abc
+  return s;
+};
+
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
 // PostgreSQLのTIMESTAMP型 (OID: 1114) は「UTC」として扱い、Dateオブジェクトに変換してからフロントに返す
@@ -715,7 +731,7 @@ export const taskController = {
 
   async exportTasks(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { projectId } = req.params;
+      const { id: projectId } = req.params;
       const userId = req.user?.userId;
       const tenantId = req.user?.tenantId;
 
@@ -727,38 +743,27 @@ export const taskController = {
       );
 
       if (accessCheck.rows.length === 0) {
-        res.status(403).json({ error: 'アクセス権限がありません' });
+        res.status(403).json({ message: 'アクセス権限がありません' });
         return;
       }
 
-      // 2. タスクデータの取得
+      // 2. タスクデータの取得（TO_CHARでDB側でYYYY-MM-DDに整形し、TZずれを防ぐ）
       const result = await pool.query(
-        `SELECT id, title, description, status, due_date
+        `SELECT id, title, description, status,
+                TO_CHAR(due_date, 'YYYY-MM-DD') AS due_date
          FROM tasks
          WHERE project_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
          ORDER BY created_at ASC`,
         [projectId, tenantId]
       );
 
-      const formattedTasks = result.rows.map(task => {
-        let formattedDueDate = '';
-
-        if (task.due_date) {
-          const dateObj = new Date(Number(task.due_date));
-          if (!isNaN(dateObj.getTime())) {
-            // 'YYYY-MM-DD' 形式に変換
-            formattedDueDate = dateObj.toISOString().split('T')[0] || '';
-          }
-        }
-
-        const cleanDescription = stripHtmlTags(task.description);
-
-        return {
-          ...task,
-          due_date: formattedDueDate,
-          description: cleanDescription
-        };
-      });
+      const formattedTasks = result.rows.map(task => ({
+        id: task.id,
+        title: escapeForExcel(task.title),
+        description: escapeForExcel(stripHtmlTags(task.description)),
+        status: task.status,
+        due_date: task.due_date ?? '',
+      }));
 
       // 3. CSV文字列への変換
       const csvString = stringify(formattedTasks, {
@@ -790,7 +795,7 @@ export const taskController = {
 
   async importTasks(req: AuthRequest, res: Response): Promise<void> {
     try {
-      const { projectId } = req.params;
+      const { id: projectId } = req.params;
       const userId = req.user?.userId;
       const tenantId = req.user?.tenantId;
 
@@ -812,14 +817,14 @@ export const taskController = {
         return;
       }
 
-      if (memberCheck.rows[0].role === 'viewer') {
+      if (memberCheck.rows[0].role === 'Viewer') {
         fs.unlinkSync(req.file.path);
         res.status(403).json({ message: '閲覧者権限ではインポートを実行できません' });
         return;
       }
 
       // 3. CSVファイルの読み込みとパース（配列への変換）
-      const fileContent = fs.readFileSync(req.file.path, 'utf-8');
+      const fileContent = await fs.promises.readFile(req.file.path, 'utf-8');
 
       const cleanContent = fileContent.replace(/^\uFEFF/, '');
       const records = parse(cleanContent, {
@@ -827,52 +832,70 @@ export const taskController = {
         skip_empty_lines: true
       }) as CsvRecord[];
 
+      if (records.length > MAX_IMPORT_ROWS) {
+        fs.unlinkSync(req.file.path);
+        res.status(413).json({ message: `${MAX_IMPORT_ROWS}行までしかインポートできません（${records.length}行検出）` });
+        return;
+      }
+
       // 4. 一時ファイルを削除
       fs.unlinkSync(req.file.path);
+
+      // 5. 事前バリデーション（トランザクション外で行い、エラー行を特定してユーザに返す）
+      const validationErrors: string[] = [];
+      records.forEach((record, i) => {
+        if (!record['タイトル']?.trim()) {
+          validationErrors.push(`${i + 1}行目: タイトルが空です`);
+        }
+        if (record.ID && !record['ステータス']?.trim()) {
+          validationErrors.push(`${i + 1}行目: IDありレコードのステータスが空です`);
+        } else if (record['ステータス'] && !ALLOWED_STATUS.has(record['ステータス'])) {
+          validationErrors.push(`${i + 1}行目: 不正なステータス「${record['ステータス']}」`);
+        }
+      });
+      if (validationErrors.length > 0) {
+        res.status(400).json({ message: validationErrors.join('\n') });
+        return;
+      }
 
       const client = await pool.connect();
 
       try {
         await client.query('BEGIN');
 
-        for (const record of records) {
+        const updateRecords = records.filter(r => r.ID);
+        const insertRecords = records.filter(r => !r.ID);
 
-          // 日付(YYYY-MM-DD)を、DB用のUNIXタイムスタンプに戻す
-          let dueDateStr = null;
-          if (record['期限']) {
-            const d = new Date(record['期限']);
-            if (!isNaN(d.getTime())) {
-              dueDateStr = d;
-            }
-          }
+        // UPDATE: テナント・プロジェクト境界を WHERE で担保
+        for (const record of updateRecords) {
+          const statusValue = ALLOWED_STATUS.has(record['ステータス']) ? record['ステータス'] : 'TODO';
+          // YYYY-MM-DD 文字列をそのまま渡し、PostgreSQL に日付解釈を委ねる（TZずれ防止）
+          const dueDateStr = record['期限']?.trim() || null;
+          await client.query(
+            `UPDATE tasks
+             SET title = $1, description = $2, status = $3, due_date = $4
+             WHERE id = $5 AND project_id = $6 AND tenant_id = $7`,
+            [unescapeFromExcel(record['タイトル']), record['内容'] ? unescapeFromExcel(record['内容']) : null, statusValue, dueDateStr, record.ID, projectId, tenantId]
+          );
+        }
 
-          // ステータスが空文字や未定義ならTODOにする
-          const statusValue = record['ステータス'] || 'TODO';
-
-          // IDの有無で UPDATE（更新）か INSERT（新規追加）か分岐
-          if (record.ID) {
-            // 既存タスクの更新 (UPDATE)
-            await client.query(
-              `UPDATE tasks
-              SET title = $1, description = $2, status = $3, due_date = $4
-              WHERE id = $5 AND project_id = $6 AND tenant_id = $7`,
-              [record['タイトル'], record['内容'], statusValue, dueDateStr, record.ID, projectId, tenantId]
-            );
-          } else {
-            // 新規タスクの登録 (INSERT)
-            await client.query(
-              `INSERT INTO tasks (title, description, status, due_date, project_id, tenant_id)
-              VALUES ($1, $2, $3, $4, $5, $6)`,
-              [record['タイトル'], record['内容'], statusValue, dueDateStr, projectId, tenantId]
-            );
-          }
+        // INSERT: 複数値構文で一括登録（ラウンドトリップ削減）
+        if (insertRecords.length > 0) {
+          const values: (string | number | null)[] = [];
+          const placeholders = insertRecords.map((record, i) => {
+            const base = i * 6;
+            const statusValue = ALLOWED_STATUS.has(record['ステータス']) ? record['ステータス'] : 'TODO';
+            const dueDateStr = record['期限']?.trim() || null;
+            values.push(unescapeFromExcel(record['タイトル']), record['内容'] ? unescapeFromExcel(record['内容']) : null, statusValue, dueDateStr, parseInt(projectId as string), tenantId!);
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6})`;
+          });
+          await client.query(
+            `INSERT INTO tasks (title, description, status, due_date, project_id, tenant_id) VALUES ${placeholders.join(', ')}`,
+            values
+          );
         }
 
         await client.query('COMMIT');
-
-        res.status(200).json({ message: 'CSVのインポートが完了しました' });
-        return;
-
       } catch (error) {
         await client.query('ROLLBACK');
         console.error('Transaction Error:', error);
@@ -881,6 +904,20 @@ export const taskController = {
       } finally {
         client.release();
       }
+
+      // COMMIT後の非本質処理（失敗しても正常応答を返す）
+      try {
+        if (tenantId && userId) {
+          await logActivity(pool, tenantId, parseInt(projectId as string), null, userId, 'TASKS_IMPORTED', {
+            count: records.length,
+          });
+        }
+        io.to(`project_${projectId}`).emit('tasks:imported', { senderId: userId, count: records.length });
+      } catch (e) {
+        console.error('Post-commit processing failed:', e);
+      }
+
+      res.status(200).json({ message: `CSVのインポートが完了しました（${records.length}件）` });
     } catch (error) {
       console.error('Import Error:', error);
       if (req.file && fs.existsSync(req.file.path)) {

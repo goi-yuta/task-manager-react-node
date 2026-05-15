@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TASK_STATUS, type Task, type SortOrder, type TaskStatus } from '../types';
 import { useSocket } from '../contexts/SocketContext';
-import { API_BASE } from '../config';
 
 export const useTaskManager = (currentProjectId: number | null, apiFetch: any, currentUserId?: number) => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -26,43 +25,6 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
       socket.emit('leave:project', currentProjectId);
     };
   }, [socket, currentProjectId]);
-
-  // WebSocketイベントの購読
-  useEffect(() => {
-    if (!socket || !currentProjectId) return;
-
-    const handleTaskCreated = (data: { task: Task; senderId: number }) => {
-      // 自分の操作なら無視（既にオプティミスティックUIで反映済み、またはfetchTasksで更新済み）
-      if (data.senderId === currentUserId) return;
-
-      // 現在表示中のプロジェクトのタスクであれば追加
-      if (data.task.project_id === currentProjectId) {
-        setTasks(prev => [...prev, data.task]);
-      }
-    };
-
-    const handleTaskUpdated = (data: { task: Task; senderId: number }) => {
-      if (data.senderId === currentUserId) return;
-
-      setTasks(prev => prev.map(t => t.id === data.task.id ? data.task : t));
-    };
-
-    const handleTaskDeleted = (data: { taskId: number; senderId: number }) => {
-      if (data.senderId === currentUserId) return;
-
-      setTasks(prev => prev.filter(t => t.id !== data.taskId));
-    };
-
-    socket.on('task:created', handleTaskCreated);
-    socket.on('task:updated', handleTaskUpdated);
-    socket.on('task:deleted', handleTaskDeleted);
-
-    return () => {
-      socket.off('task:created', handleTaskCreated);
-      socket.off('task:updated', handleTaskUpdated);
-      socket.off('task:deleted', handleTaskDeleted);
-    };
-  }, [socket, currentProjectId, currentUserId]);
 
   // タスクの取得
   const fetchTasks = useCallback(async () => {
@@ -91,6 +53,50 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
       setLoading(false);
     }
   }, [apiFetch, currentProjectId, filterStatus, filterAssignee, activeKeyword]);
+
+  // WebSocketイベントの購読
+  useEffect(() => {
+    if (!socket || !currentProjectId) return;
+
+    const handleTaskCreated = (data: { task: Task; senderId: number }) => {
+      // 自分の操作なら無視（既にオプティミスティックUIで反映済み、またはfetchTasksで更新済み）
+      if (data.senderId === currentUserId) return;
+
+      // 現在表示中のプロジェクトのタスクであれば追加
+      if (data.task.project_id === currentProjectId) {
+        setTasks(prev => [...prev, data.task]);
+      }
+    };
+
+    const handleTaskUpdated = (data: { task: Task; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+
+      setTasks(prev => prev.map(t => t.id === data.task.id ? data.task : t));
+    };
+
+    const handleTaskDeleted = (data: { taskId: number; senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+
+      setTasks(prev => prev.filter(t => t.id !== data.taskId));
+    };
+
+    const handleTasksImported = (data: { senderId: number }) => {
+      if (data.senderId === currentUserId) return;
+      fetchTasks();
+    };
+
+    socket.on('task:created', handleTaskCreated);
+    socket.on('task:updated', handleTaskUpdated);
+    socket.on('task:deleted', handleTaskDeleted);
+    socket.on('tasks:imported', handleTasksImported);
+
+    return () => {
+      socket.off('task:created', handleTaskCreated);
+      socket.off('task:updated', handleTaskUpdated);
+      socket.off('task:deleted', handleTaskDeleted);
+      socket.off('tasks:imported', handleTasksImported);
+    };
+  }, [socket, currentProjectId, currentUserId, fetchTasks]);
 
   // プロジェクトが切り替わった時、またはフィルターが変わった時にタスクを再取得
   useEffect(() => {
@@ -201,72 +207,57 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
     return [...tasks].sort((a, b) => sortOrder === 'asc' ? a.id - b.id : b.id - a.id);
   }, [tasks, sortOrder]);
 
-  const exportToCSV = async (projectId: number) => {
-    try {
-      const token = localStorage.getItem('token');
+  const exportToCSV = useCallback(async (projectId: number) => {
+    const res = await apiFetch(`/projects/${projectId}/tasks/export`);
 
-      // res.json() でパースされないよう、通常の fetch を使用
-      const res = await fetch(`${API_BASE}/tasks/export/${projectId}`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error('Download failed:', res.status, errorText);
-        throw new Error('ダウンロード失敗');
-      }
-
-      // 1. レスポンスを Blob（塊）として取得
-      const blob = await res.blob();
-
-      // 2. ブラウザのメモリ上に一時的なURLを作成
-      const url = window.URL.createObjectURL(blob);
-
-      // 3. <a>タグを動的に生成して、擬似的にクリック
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `tasks_${projectId}.csv`;
-      document.body.appendChild(a);
-      a.click();
-
-      // 4. 後片付け（メモリ解放）
-      window.URL.revokeObjectURL(url);
-      a.remove();
-    } catch (error) {
-      alert('CSVの出力に失敗しました(useTaskManager.ts)');
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error('Download failed:', res.status, errorText);
+      throw new Error('ダウンロード失敗');
     }
-  };
 
-  const importCSV = async (projectId: number, file: File) => {
-    try {
-      const token = localStorage.getItem('token');
+    // 1. Content-Disposition からサーバ指定のファイル名を取得
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const filenameMatch = disposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+    const filename = filenameMatch?.[1]?.replace(/['"]/g, '') ?? `tasks_project_${projectId}.csv`;
 
-      const formData = new FormData();
-      formData.append('file', file);
+    // 2. レスポンスを Blob として取得し、ブラウザのメモリ上に一時URLを作成
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
 
-      const res = await fetch(`${API_BASE}/tasks/import/${projectId}`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        },
-        body: formData,
-      });
+    // 3. <a>タグを動的生成して擬似クリック（サーバ指定のファイル名を使用）
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
 
-      if (!res.ok) {
+    // 4. 後片付け（メモリ解放）
+    window.URL.revokeObjectURL(url);
+    a.remove();
+  }, [apiFetch]);
+
+  const importCSV = useCallback(async (projectId: number, file: File) => {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await apiFetch(`/projects/${projectId}/tasks/import`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) {
+      let errorMessage = 'インポートに失敗しました';
+      try {
         const errorData = await res.json();
-        throw new Error(errorData.message || 'インポートに失敗しました');
-      }
-
-      fetchTasks();
-      return true;
-    } catch (error) {
-      console.error('Import Error:', error);
-      throw error;
+        errorMessage = errorData.message || errorMessage;
+      } catch { /* JSON解析失敗時はデフォルトメッセージを使用 */ }
+      throw new Error(errorMessage);
     }
-  };
+
+    fetchTasks();
+    return true;
+  }, [apiFetch, fetchTasks]);
 
   return {
     tasks: displayedTasks,
