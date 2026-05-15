@@ -5,6 +5,8 @@ import path from 'path';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { logActivity } from '../utils/activityLogger';
 import { io } from '../index';
+import { stringify } from 'csv-stringify/sync';
+import { stripHtmlTags } from '../utils/textUtils';
 
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
@@ -699,6 +701,81 @@ export const taskController = {
     } catch (err: any) {
       console.error('Failed to fetch activity logs:', err);
       res.status(500).json({ error: 'アクティビティログの取得に失敗しました' });
+    }
+  },
+
+  async exportTasks(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { projectId } = req.params;
+      const userId = req.user?.userId;
+      const tenantId = req.user?.tenantId;
+
+      // 1. プロジェクトへのアクセス権限チェック
+      const accessCheck = await pool.query(
+        `SELECT role FROM project_members
+         WHERE project_id = $1 AND user_id = $2`,
+        [projectId, userId]
+      );
+
+      if (accessCheck.rows.length === 0) {
+        res.status(403).json({ error: 'アクセス権限がありません' });
+        return;
+      }
+
+      // 2. タスクデータの取得
+      const result = await pool.query(
+        `SELECT id, title, description, status, due_date
+         FROM tasks
+         WHERE project_id = $1 AND tenant_id = $2 AND deleted_at IS NULL
+         ORDER BY created_at ASC`,
+        [projectId, tenantId]
+      );
+
+      const formattedTasks = result.rows.map(task => {
+        let formattedDueDate = '';
+
+        if (task.due_date) {
+          const dateObj = new Date(Number(task.due_date));
+          if (!isNaN(dateObj.getTime())) {
+            // 'YYYY-MM-DD' 形式に変換
+            formattedDueDate = dateObj.toISOString().split('T')[0] || '';
+          }
+        }
+
+        const cleanDescription = stripHtmlTags(task.description);
+
+        return {
+          ...task,
+          due_date: formattedDueDate,
+          description: cleanDescription
+        };
+      });
+
+      // 3. CSV文字列への変換
+      const csvString = stringify(formattedTasks, {
+        header: true,
+        columns: [
+          { key: 'id', header: 'ID' },
+          { key: 'title', header: 'タイトル' },
+          { key: 'description', header: '内容' },
+          { key: 'status', header: 'ステータス' },
+          { key: 'due_date', header: '期限' }
+        ]
+      });
+
+      // 4. 【重要】Excel文字化け対策（BOMの付与）
+      // UTF-8のBOMである \ufeff を先頭に付与
+      const bom = Buffer.from('\ufeff');
+      const csvWithBom = Buffer.concat([bom, Buffer.from(csvString)]);
+
+      // 5. レスポンスヘッダーの設定
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename=tasks_project_${projectId}.csv`);
+
+      res.status(200).send(csvWithBom);
+    } catch (error) {
+      console.error('Export Error:', error);
+      res.status(500).json({ message: 'CSVの出力に失敗しました' });
     }
   }
 };

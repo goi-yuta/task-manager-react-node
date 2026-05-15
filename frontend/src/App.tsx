@@ -188,7 +188,8 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     filterAssignee, setFilterAssignee,
     filterKeyword, setFilterKeyword,
     executeSearch,
-    clearFilters
+    clearFilters,
+    exportToCSV
   } = useTaskManager(currentProjectId, apiFetch, user.id);
 
   // 初期データの取得（プロジェクト一覧とユーザー一覧）
@@ -292,6 +293,22 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
   // プロジェクトが1つもない初期状態、または自分がOwnerとして参加しているプロジェクトが1つでもあれば許可
   const isTenantOwner = projects.length === 0 || projects.some(p => p.role === 'Owner');
 
+  const [isExporting, setIsExporting] = useState(false);
+  const handleExportCSV = async () => {
+    if (!currentProject) return;
+
+    setIsExporting(true);
+    try {
+      await exportToCSV(currentProject.id);
+      // ダウンロードはブラウザが自動で処理してくれます
+    } catch (error) {
+      console.error(error);
+      alert('CSVの出力に失敗しました(App.tsx)');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <Header
@@ -365,6 +382,14 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
             <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center mb-6 gap-4">
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-bold text-slate-800">タスク一覧 <span className="text-slate-400 text-sm">({rawTasks.length}件)</span></h2>
+
+                <button
+                  onClick={handleExportCSV}
+                  disabled={!currentProject || isExporting}
+                  className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isExporting ? '出力中...' : 'CSVエクスポート'}
+                </button>
 
                 <div className="flex bg-slate-200/50 p-1 rounded-lg">
                   <button

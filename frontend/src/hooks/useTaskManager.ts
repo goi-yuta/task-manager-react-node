@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { TASK_STATUS, type Task, type SortOrder, type TaskStatus } from '../types';
 import { useSocket } from '../contexts/SocketContext';
+import { API_BASE } from '../config';
 
 export const useTaskManager = (currentProjectId: number | null, apiFetch: any, currentUserId?: number) => {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -200,6 +201,45 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
     return [...tasks].sort((a, b) => sortOrder === 'asc' ? a.id - b.id : b.id - a.id);
   }, [tasks, sortOrder]);
 
+  const exportToCSV = async (projectId: number) => {
+    try {
+      const token = localStorage.getItem('token');
+
+      // res.json() でパースされないよう、通常の fetch を使用
+      const res = await fetch(`${API_BASE}/tasks/export/${projectId}`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        console.error('Download failed:', res.status, errorText);
+        throw new Error('ダウンロード失敗');
+      }
+
+      // 1. レスポンスを Blob（塊）として取得
+      const blob = await res.blob();
+
+      // 2. ブラウザのメモリ上に一時的なURLを作成
+      const url = window.URL.createObjectURL(blob);
+
+      // 3. <a>タグを動的に生成して、擬似的にクリック
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `tasks_${projectId}.csv`;
+      document.body.appendChild(a);
+      a.click();
+
+      // 4. 後片付け（メモリ解放）
+      window.URL.revokeObjectURL(url);
+      a.remove();
+    } catch (error) {
+      alert('CSVの出力に失敗しました(useTaskManager.ts)');
+    }
+  };
+
   return {
     tasks: displayedTasks,
     rawTasks: tasks,
@@ -217,5 +257,6 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
     filterKeyword, setFilterKeyword,
     executeSearch,
     clearFilters,
+    exportToCSV,
   };
 };

@@ -25,4 +25,6 @@ router.delete('/:id/attachments/:attachmentId', taskController.deleteAttachment)
 
 router.get('/:id/logs', taskController.getTaskActivityLogs);
 
+router.get('/export/:projectId', taskController.exportTasks);
+
 export default router;
