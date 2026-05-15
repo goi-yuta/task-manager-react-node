@@ -7,6 +7,15 @@ import { logActivity } from '../utils/activityLogger';
 import { io } from '../index';
 import { stringify } from 'csv-stringify/sync';
 import { stripHtmlTags } from '../utils/textUtils';
+import { parse } from 'csv-parse/sync';
+
+interface CsvRecord {
+  ID: string;
+  タイトル: string;
+  内容: string;
+  ステータス: string;
+  期限: string;
+}
 
 // PostgreSQLのDATE型(OID: 1082)はDateオブジェクトに自動変換せず、純粋な文字列のまま取得する設定
 types.setTypeParser(1082, (stringValue) => stringValue);
@@ -776,6 +785,109 @@ export const taskController = {
     } catch (error) {
       console.error('Export Error:', error);
       res.status(500).json({ message: 'CSVの出力に失敗しました' });
+    }
+  },
+
+  async importTasks(req: AuthRequest, res: Response): Promise<void> {
+    try {
+      const { projectId } = req.params;
+      const userId = req.user?.userId;
+      const tenantId = req.user?.tenantId;
+
+      // 1. ファイルがアップロードされているか確認
+      if (!req.file) {
+        res.status(400).json({ message: 'CSVファイルが選択されていません' });
+        return;
+      }
+
+      // 2. アクセス権限チェック（ Viewer は弾く）
+      const memberCheck = await pool.query(
+        `SELECT role FROM project_members WHERE project_id = $1 AND user_id = $2`,
+        [projectId, userId]
+      );
+
+      if (memberCheck.rows.length === 0) {
+        fs.unlinkSync(req.file.path);
+        res.status(403).json({ message: 'このプロジェクトへのアクセス権限がありません' });
+        return;
+      }
+
+      if (memberCheck.rows[0].role === 'viewer') {
+        fs.unlinkSync(req.file.path);
+        res.status(403).json({ message: '閲覧者権限ではインポートを実行できません' });
+        return;
+      }
+
+      // 3. CSVファイルの読み込みとパース（配列への変換）
+      const fileContent = fs.readFileSync(req.file.path, 'utf-8');
+
+      const cleanContent = fileContent.replace(/^\uFEFF/, '');
+      const records = parse(cleanContent, {
+        columns: true,
+        skip_empty_lines: true
+      }) as CsvRecord[];
+
+      // 4. 一時ファイルを削除
+      fs.unlinkSync(req.file.path);
+
+      const client = await pool.connect();
+
+      try {
+        await client.query('BEGIN');
+
+        for (const record of records) {
+
+          // 日付(YYYY-MM-DD)を、DB用のUNIXタイムスタンプに戻す
+          let dueDateStr = null;
+          if (record['期限']) {
+            const d = new Date(record['期限']);
+            if (!isNaN(d.getTime())) {
+              dueDateStr = d;
+            }
+          }
+
+          // ステータスが空文字や未定義ならTODOにする
+          const statusValue = record['ステータス'] || 'TODO';
+
+          // IDの有無で UPDATE（更新）か INSERT（新規追加）か分岐
+          if (record.ID) {
+            // 既存タスクの更新 (UPDATE)
+            await client.query(
+              `UPDATE tasks
+              SET title = $1, description = $2, status = $3, due_date = $4
+              WHERE id = $5 AND project_id = $6 AND tenant_id = $7`,
+              [record['タイトル'], record['内容'], statusValue, dueDateStr, record.ID, projectId, tenantId]
+            );
+          } else {
+            // 新規タスクの登録 (INSERT)
+            await client.query(
+              `INSERT INTO tasks (title, description, status, due_date, project_id, tenant_id)
+              VALUES ($1, $2, $3, $4, $5, $6)`,
+              [record['タイトル'], record['内容'], statusValue, dueDateStr, projectId, tenantId]
+            );
+          }
+        }
+
+        await client.query('COMMIT');
+
+        res.status(200).json({ message: 'CSVのインポートが完了しました' });
+        return;
+
+      } catch (error) {
+        await client.query('ROLLBACK');
+        console.error('Transaction Error:', error);
+        res.status(500).json({ message: 'インポート中にエラーが発生し、処理をロールバックしました' });
+        return;
+      } finally {
+        client.release();
+      }
+    } catch (error) {
+      console.error('Import Error:', error);
+      if (req.file && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      res.status(500).json({ message: 'CSVのインポートに失敗しました' });
+      return;
     }
   }
 };

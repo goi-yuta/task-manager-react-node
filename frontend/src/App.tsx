@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { InviteMemberModal } from './components/InviteMemberModal';
 import { InviteUserModal } from './components/InviteUserModal';
 import { TaskEditModal } from './components/TaskEditModal';
@@ -189,7 +189,8 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     filterKeyword, setFilterKeyword,
     executeSearch,
     clearFilters,
-    exportToCSV
+    exportToCSV,
+    importCSV,
   } = useTaskManager(currentProjectId, apiFetch, user.id);
 
   // 初期データの取得（プロジェクト一覧とユーザー一覧）
@@ -309,6 +310,34 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
     }
   };
 
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isImporting, setIsImporting] = useState(false);
+
+  const handleImportButtonClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!currentProject) return;
+
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsImporting(true);
+      await importCSV(currentProject.id, file);
+      alert('CSVのインポートに成功しました！');
+    } catch (error: any) {
+      alert(`エラー: ${error.message}`);
+    } finally {
+      setIsImporting(false);
+      // 同じファイルを連続で選べるように、inputの値をリセットしておく
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       <Header
@@ -383,14 +412,6 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
               <div className="flex items-center gap-4">
                 <h2 className="text-xl font-bold text-slate-800">タスク一覧 <span className="text-slate-400 text-sm">({rawTasks.length}件)</span></h2>
 
-                <button
-                  onClick={handleExportCSV}
-                  disabled={!currentProject || isExporting}
-                  className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
-                >
-                  {isExporting ? '出力中...' : 'CSVエクスポート'}
-                </button>
-
                 <div className="flex bg-slate-200/50 p-1 rounded-lg">
                   <button
                     onClick={() => setViewMode('list')}
@@ -407,11 +428,37 @@ const MainApp: React.FC<{ user: UserData, logout: () => void, apiFetch: any, tok
                 </div>
               </div>
 
-              <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)} className="text-sm border-2 border-slate-200 rounded-xl px-3 py-1.5 bg-white font-medium cursor-pointer">
-                <option value="default">標準</option>
-                <option value="asc">古い順</option>
-                <option value="desc">新しい順</option>
-              </select>
+              <div className="flex items-center gap-4">
+                <button
+                  onClick={handleExportCSV}
+                  disabled={!currentProject || isExporting}
+                  className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isExporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isExporting ? '出力中...' : 'CSVエクスポート'}
+                </button>
+
+                <input
+                  type="file"
+                  accept=".csv"
+                  ref={fileInputRef}
+                  style={{ display: 'none' }}
+                  onChange={handleFileChange}
+                />
+
+                <button
+                  onClick={handleImportButtonClick}
+                  disabled={isImporting}
+                  className={`px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isImporting ? 'インポート中...' : 'CSVインポート'}
+                </button>
+
+                <select value={sortOrder} onChange={(e) => setSortOrder(e.target.value as SortOrder)} className="text-sm border-2 border-slate-200 rounded-xl px-3 py-1.5 bg-white font-medium cursor-pointer">
+                  <option value="default">標準</option>
+                  <option value="asc">古い順</option>
+                  <option value="desc">新しい順</option>
+                </select>
+              </div>
             </div>
 
             {tasksLoading && rawTasks.length === 0 ? (

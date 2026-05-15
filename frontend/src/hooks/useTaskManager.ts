@@ -240,6 +240,34 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
     }
   };
 
+  const importCSV = async (projectId: number, file: File) => {
+    try {
+      const token = localStorage.getItem('token');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch(`${API_BASE}/tasks/import/${projectId}`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.message || 'インポートに失敗しました');
+      }
+
+      fetchTasks();
+      return true;
+    } catch (error) {
+      console.error('Import Error:', error);
+      throw error;
+    }
+  };
+
   return {
     tasks: displayedTasks,
     rawTasks: tasks,
@@ -258,5 +286,6 @@ export const useTaskManager = (currentProjectId: number | null, apiFetch: any, c
     executeSearch,
     clearFilters,
     exportToCSV,
+    importCSV,
   };
 };
