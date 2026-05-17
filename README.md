@@ -29,7 +29,8 @@
   [「誰かが変えた」を即座に反映する。20年目のフロントエンジニアがSocket.IOでリアルタイム同期と通知機能を自作して得た設計の学び](https://zenn.dev/goiyu/articles/3f7124cdfea772)
 * **第11回（メール通知 ＆ 定期バッチ処理編）**：  
   [Fire-and-ForgetとAt-least-once。20年目のフロントエンジニアがメール通知で学んだ設計パターン](https://zenn.dev/goiyu/articles/0e1e4c8076c5ec)
-
+* **第12回（CSVエクスポート & インポート編）**：  
+  [BOM・CSV Injection・認可バイパス、20年目のフロントエンジニアが踏み抜いた罠の全記録](https://zenn.dev/goiyu/articles/77207b3fd49d1a)
 
 ## 🛠️ 技術スタック
 
@@ -55,6 +56,9 @@
 * [Socket.IO](https://socket.io/)（WebSocketサーバー）
 * [Nodemailer](https://nodemailer.com/)（メール送信）
 * [node-cron](https://github.com/node-cron/node-cron)（定期バッチ処理）
+* [Multer](https://github.com/expressjs/multer)（ファイルアップロード処理）
+* [csv-parse](https://csv.js.org/parse/)（CSVパース）
+* [csv-stringify](https://csv.js.org/stringify/)（CSV生成）
 
 ## 📁 ディレクトリ構成
 
@@ -152,8 +156,8 @@ npm run dev
 - [x] アクティビティログ
 - [x] WebSocketを利用したリアルタイム同期・アプリ内通知
 - [x] メール通知 ＆ 定期バッチ処理
-- [ ] **CSVでの一括インポート / エクスポート（次のターゲット）**
-- [ ] PostgreSQLのフルテキスト検索機能
+- [x] CSVでの一括インポート / エクスポート
+- [ ] **PostgreSQLのフルテキスト検索機能（次のターゲット）**
 
 ## 🤝 著者
 [goiyu](https://github.com/goi-yuta)
